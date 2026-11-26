@@ -38,7 +38,7 @@ Celem jest zgodność funkcjonalna z Rufusem z rewizji 8337c3e7e534b5d5b5045dd8e
 
 ## Warunek wydania
 
-Nowy release zgodności z Rufusem wymaga działających powyższych funkcji, przejścia testów regresji, porównania układów woluminów i rozruchu oraz prób na fizycznym Androidzie z USB OTG. Testy parserów ani samo zbudowanie APK nie potwierdzają zgodności całego portu.
+Nowy release zgodności z Rufusem wymaga działających powyższych funkcji, przejścia testów regresji i porównania układów woluminów oraz rozruchu. Zakres testów sprzętowych jest raportowany wraz z wydaniem. Testy parserów ani samo zbudowanie APK nie potwierdzają zgodności całego portu.
 
 
 ## Budowanie części natywnej
@@ -69,4 +69,13 @@ Bieżąca gałąź wykorzystuje natywną ścieżkę NTFS w interfejsie Androida.
 
 Test rozruchu użył 1071 wpisów i 885 781 214 bajtów plików oficjalnego Windows 11 Enterprise Evaluation, odczytanych bezpośrednio z UDF. Dane zapisano przez Java/JNI/NTFS do obrazu dysku i zweryfikowano SHA-256. UEFI:NTFS 2.8 znalazł partycję NTFS, załadował sterownik NTFS 1.9 i uruchomił Microsoft Windows Boot Manager. Windows PE doszedł do interfejsu Windows 11 Setup w QEMU/OVMF.
 
-Ze względu na miejsce w środowisku testowy obraz rozruchowy pomijał sources/install.wim. Setup pokazał ekran ładowania sterownika. Ten test potwierdza łańcuch rozruchu i start WinPE. Pełna instalacja, rzeczywiste skopiowanie całego install.wim i pozostałe opcje Rufusa wymagają dalszej weryfikacji.
+Ze względu na miejsce w środowisku testowy obraz rozruchowy pomijał sources/install.wim. Setup pokazał ekran ładowania sterownika. Ten test potwierdza łańcuch rozruchu i start WinPE. Pełna instalacja systemu i pozostałe opcje Rufusa wymagają dalszej weryfikacji. Skopiowanie całego install.wim potwierdził następny test CI opisany poniżej.
+
+
+## Pełny obraz Windows w CI
+
+[Przebieg GitHub Actions 45854103458](https://github.com/Novicek000/RufusPortable/actions/runs/45854103458) zakończył się sukcesem dla rewizji 82c6371. Test odczytał oficjalne ISO o rozmiarze 8 225 329 152 bajtów i utworzył 1072 wpisy. Zapisano 8 219 683 755 bajtów plików na NTFS, w tym sources/install.wim o długości 7 333 902 541 bajtów w 7 fragmentach UDF. Po ponownym zamontowaniu woluminu zgadzały się długości i SHA-256 wszystkich plików. Metadane partycji również przeszły porównanie.
+
+Test używa ograniczonej do 8 MiB pamięci podręcznej zakresów HTTP, obrazu dysku w środowisku runnera i natywnej biblioteki hosta z tego samego źródła co Android. Biblioteki Androida dla czterech ABI są odrębnie kompilowane do APK. Kopiowanie i odczyt testowe nie stanowią wykonania instalacji Windows na komputerze ani próby na fizycznym telefonie.
+
+Kompilacja źródeł NTFS używa jawnie C11. Poprawka w scripts/patches/ntfs-3g zachowuje kwalifikator const dla wyniku wyszukiwania w stałym łańcuchu. Jest nakładana na kopię źródła w katalogu build, a przypięty podmoduł pozostaje źródłem referencyjnym.
