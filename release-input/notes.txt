@@ -1,0 +1,8 @@
+Pierwsze wydanie RufusPortable na Androida 8.0 i nowszego. Pobierz plik RufusPortable-1.0.0.apk poniżej.
+
+- Zapis rozpakowanych obrazów dysków i hybrydowych ISO na nośnik USB OTG w trybie sektorowym.
+- Wybór urządzenia i potwierdzenie usunięcia danych z podglądem nazwy, identyfikatora USB i pojemności.
+- Odczyt po zapisie i weryfikacja SHA-256.
+- Polski interfejs Material 3 Expressive, jasny i ciemny motyw oraz sprawdzanie nowych wydań na GitHubie.
+
+Obsługiwane urządzenia korzystają z USB Mass Storage Bulk-Only Transport i SCSI. Zwykłe instalacyjne ISO Windows wymagające konwersji nie są obsługiwane. Testy transportu wykonano z symulowanym urządzeniem USB. Zapis na fizycznym pendrivie OTG wymaga jeszcze próby sprzętowej.
