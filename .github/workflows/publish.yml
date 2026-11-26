@@ -1,0 +1,18 @@
+name: Publish signed Android 1.1.0
+on:
+  push:
+    branches: [publish/android-v1.1.0]
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Verify and publish APK
+        working-directory: release-input
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha256sum -c SHA256SUMS
+          gh release create v1.1.0 RufusPortable-1.1.0.apk SHA256SUMS --target 85bf0d0940920c8bc5c305af98bc52f29c86911d --title 'RufusPortable 1.1.0 na Androida' --notes-file notes.txt

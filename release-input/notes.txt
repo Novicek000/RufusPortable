@@ -1,0 +1,8 @@
+**Aktualizacja dla użytkowników wersji 1.0.0.** Pobierz RufusPortable-1.1.0.apk i otwórz go na telefonie. Podpis i identyfikator aplikacji są zgodne z poprzednim wydaniem.
+
+- Windows 11 ISO działa w trybie Ventoy. Wybierz ISO, potwierdź właściwy nośnik, po zapisie uruchom komputer z USB i wybierz plik w menu.
+- Nazwa wybranego pliku pozostaje widoczna także po błędzie. Aplikacja odczytuje obraz z wybranego dokumentu bez tworzenia kopii tymczasowej na telefonie.
+- W opcjach trybu ISO można wybrać MBR/GPT, klaster exFAT i etykietę. Pozostałe tryby obejmują zapis sektorowy DD, FreeDOS i formatowanie FAT32.
+- Dostępne są obliczanie SHA-256 źródła, weryfikacja po zapisie i pełny test bloków przed zapisem. Potwierdzenie zastępuje dane na wybranym nośniku.
+
+**Sprawdzone:** 12 testów automatycznych, kontrola poprawności exFAT, rozruch FreeDOS w BIOS oraz start oficjalnego Windows 11 Enterprise Evaluation do ekranu wyboru języka w maszynie wirtualnej UEFI. Testów na fizycznym telefonie z pendrivem OTG nie wykonano. Szczegóły funkcji i ograniczeń znajdują się w README.
