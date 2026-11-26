@@ -17,6 +17,10 @@ typedef struct rufus_ntfs rufus_ntfs;
 typedef struct rufus_ntfs_file rufus_ntfs_file;
 
 /* The disk and its context must remain valid until unmount has returned. */
+/* Serializes the formatter's upstream process-global state. Quick and full formats supported. */
+int rufus_ntfs_format(rufus_disk *disk, const char *label, int cluster_size,
+        int64_t partition_start_sector, int quick);
+int rufus_ntfs_bind_formatter(rufus_disk *disk);
 rufus_ntfs *rufus_ntfs_mount(rufus_disk *disk);
 int rufus_ntfs_mkdir(rufus_ntfs *volume, const uint16_t *path, size_t length);
 rufus_ntfs_file *rufus_ntfs_create(rufus_ntfs *volume, const uint16_t *path, size_t length);

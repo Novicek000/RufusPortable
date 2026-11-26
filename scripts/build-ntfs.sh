@@ -30,12 +30,16 @@ for abi in "${@:-arm64-v8a}"; do
         make -j"${BUILD_JOBS:-2}" -C libntfs-3g
         output_dir="$native_root/jniLibs/$abi"
         mkdir -p "$output_dir"
-        "$toolchain/$compiler" -shared -fPIC -O2 -Wall -Wextra -Werror \
-            -I "$build_dir" -I "$source_dir/include/ntfs-3g" \
+        "$toolchain/$compiler" -shared -fPIC -fvisibility=hidden -ffunction-sections -fdata-sections -O2 -Wall -Wextra -Werror -Wno-address-of-packed-member -Wno-unused-but-set-variable \
+            -I "$build_dir" -I "$source_dir/include/ntfs-3g" -I "$source_dir/ntfsprogs" \
+            -include "$build_dir/config.h" \
             "$project_dir/app/src/main/cpp/ntfs_bridge.c" \
             "$project_dir/app/src/main/cpp/ntfs_jni.c" \
+            "$project_dir/app/src/main/cpp/ntfs_format.c" \
+            "$source_dir/ntfsprogs/attrdef.c" "$source_dir/ntfsprogs/boot.c" \
+            "$source_dir/ntfsprogs/sd.c" "$source_dir/ntfsprogs/utils.c" \
             "$build_dir/libntfs-3g/.libs/libntfs-3g.a" \
-            -Wl,-z,max-page-size=16384 -Wl,--no-undefined \
+            -Wl,-z,max-page-size=16384 -Wl,--no-undefined -Wl,--gc-sections -pthread \
             -o "$output_dir/librufus_ntfs.so"
     )
 done

@@ -36,13 +36,37 @@ struct rufus_ntfs_file {
 typedef struct {
     rufus_disk *disk;
     int64_t position;
+    int owned;
 } bridge_device;
+
+static _Thread_local rufus_disk *formatter_disk;
+static _Thread_local int formatter_failed;
+
+int rufus_ntfs_bind_formatter(rufus_disk *disk)
+{
+    int previous_failure = formatter_failed;
+    formatter_disk = disk;
+    formatter_failed = 0;
+    return previous_failure;
+}
 
 static int device_open(struct ntfs_device *device, int flags)
 {
     if (NDevOpen(device)) {
         errno = EBUSY;
         return -1;
+    }
+    if (!device->d_private) {
+        if (!formatter_disk) {
+            errno = ENODEV;
+            return -1;
+        }
+        bridge_device *bridge = calloc(1, sizeof(*bridge));
+        if (!bridge)
+            return -1;
+        bridge->disk = formatter_disk;
+        bridge->owned = 1;
+        device->d_private = bridge;
     }
     NDevSetOpen(device);
     if ((flags & O_ACCMODE) == O_RDONLY)
@@ -54,6 +78,8 @@ static int device_sync(struct ntfs_device *device)
 {
     bridge_device *bridge = device->d_private;
     if (bridge->disk->sync(bridge->disk->context) != 0) {
+        if (formatter_disk == bridge->disk)
+            formatter_failed = 1;
         errno = EIO;
         return -1;
     }
@@ -65,6 +91,11 @@ static int device_close(struct ntfs_device *device)
 {
     int result = device_sync(device);
     NDevClearOpen(device);
+    bridge_device *bridge = device->d_private;
+    if (bridge->owned) {
+        free(bridge);
+        device->d_private = NULL;
+    }
     return result;
 }
 
@@ -102,6 +133,8 @@ static s64 transfer(struct ntfs_device *device, void *data, s64 count, s64 offse
         int result = writing ? disk->write(disk->context, offset + done, buffer, chunk) :
                                disk->read(disk->context, offset + done, buffer, chunk);
         if (result != 0) {
+            if (formatter_disk == disk)
+                formatter_failed = 1;
             errno = EIO;
             return -1;
         }
@@ -165,6 +198,13 @@ static int device_ioctl(struct ntfs_device *device, unsigned long request, void 
 }
 
 static struct ntfs_device_operations operations = {
+    .open = device_open, .close = device_close, .seek = device_seek,
+    .read = device_read, .write = device_write, .pread = device_pread,
+    .pwrite = device_pwrite, .sync = device_sync, .stat = device_stat,
+    .ioctl = device_ioctl
+};
+
+struct ntfs_device_operations rufus_format_ops = {
     .open = device_open, .close = device_close, .seek = device_seek,
     .read = device_read, .write = device_write, .pread = device_pread,
     .pwrite = device_pwrite, .sync = device_sync, .stat = device_stat,

@@ -81,25 +81,23 @@ static void release_volume(JNIEnv *env, java_volume *volume)
     free(volume);
 }
 
-JNIEXPORT jlong JNICALL Java_pl_rufusportable_NtfsVolume_mount(
-        JNIEnv *env, jclass type, jobject device, jlong size, jint sector_size)
+static java_volume *connect_device(JNIEnv *env, jobject device, jlong size, jint sector_size)
 {
-    (void)type;
     if (!device) {
         errno = EINVAL;
         io_error(env);
-        return 0;
+        return NULL;
     }
     java_volume *volume = calloc(1, sizeof(*volume));
     if (!volume) {
         io_error(env);
-        return 0;
+        return NULL;
     }
     (*env)->GetJavaVM(env, &volume->vm);
     volume->device = (*env)->NewGlobalRef(env, device);
     if (!volume->device) {
         release_volume(env, volume);
-        return 0;
+        return NULL;
     }
     jclass device_type = (*env)->GetObjectClass(env, device);
     if (device_type && volume->device) {
@@ -113,12 +111,22 @@ JNIEXPORT jlong JNICALL Java_pl_rufusportable_NtfsVolume_mount(
         (*env)->DeleteLocalRef(env, device_type);
     if ((*env)->ExceptionCheck(env) || !volume->device) {
         release_volume(env, volume);
-        return 0;
+        return NULL;
     }
     volume->disk = (rufus_disk) {
         .context = volume, .length = size, .sector_size = sector_size,
         .read = read_device, .write = write_device, .sync = sync_device
     };
+    return volume;
+}
+
+JNIEXPORT jlong JNICALL Java_pl_rufusportable_NtfsVolume_mount(
+        JNIEnv *env, jclass type, jobject device, jlong size, jint sector_size)
+{
+    (void)type;
+    java_volume *volume = connect_device(env, device, size, sector_size);
+    if (!volume)
+        return 0;
     volume->volume = rufus_ntfs_mount(&volume->disk);
     if (!volume->volume) {
         io_error(env);
@@ -126,6 +134,41 @@ JNIEXPORT jlong JNICALL Java_pl_rufusportable_NtfsVolume_mount(
         return 0;
     }
     return (jlong)(intptr_t)volume;
+}
+
+JNIEXPORT void JNICALL Java_pl_rufusportable_NtfsVolume_format(
+        JNIEnv *env, jclass type, jobject device, jlong size, jint sector_size,
+        jbyteArray label, jint cluster_size, jlong partition_start, jboolean quick)
+{
+    (void)type;
+    if (!label) {
+        errno = EINVAL;
+        io_error(env);
+        return;
+    }
+    jsize length = (*env)->GetArrayLength(env, label);
+    if (length > 128) {
+        errno = EINVAL;
+        io_error(env);
+        return;
+    }
+    char text[129];
+    (*env)->GetByteArrayRegion(env, label, 0, length, (jbyte *)text);
+    if ((*env)->ExceptionCheck(env))
+        return;
+    if (memchr(text, 0, length)) {
+        errno = EINVAL;
+        io_error(env);
+        return;
+    }
+    text[length] = 0;
+    java_volume *volume = connect_device(env, device, size, sector_size);
+    if (!volume)
+        return;
+    int result = rufus_ntfs_format(&volume->disk, text, cluster_size, partition_start, quick);
+    if (result != 0)
+        io_error(env);
+    release_volume(env, volume);
 }
 
 JNIEXPORT void JNICALL Java_pl_rufusportable_NtfsVolume_mkdir(

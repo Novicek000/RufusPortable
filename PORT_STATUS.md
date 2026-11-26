@@ -12,8 +12,8 @@ Celem jest zgodność funkcjonalna z Rufusem z rewizji 8337c3e7e534b5d5b5045dd8e
 | Zapis DD i SHA-256 zapisanych zakresów | Istnieje |
 | ISO 9660 i Joliet | Czytnik drzewa i ekstentów, test rzeczywistego Alpine ISO |
 | UDF | Czytnik partycji fizycznych, alokacji krótkiej/długiej/osadzonej i fragmentów, test rzeczywistego Windows 11 ISO |
-| NTFS | Biblioteka pbatard/ntfs-3g i JNI dla czterech ABI w APK; tworzenie katalogów i zapis plików przez adapter dyskowy sprawdzone, formatowanie i integracja instalatora w toku |
-| UEFI:NTFS | Zasób źródłowego Rufusa dostępny, integracja oczekuje na zapis systemu plików |
+| NTFS | Biblioteka pbatard/ntfs-3g i JNI dla czterech ABI w APK; tworzenie katalogów, zapis plików i natywne szybkie/pełne formatowanie przez adapter dyskowy sprawdzone; integracja instalatora w toku |
+| UEFI:NTFS | Oryginalny obraz Rufusa w zasobach aplikacji; generator GPT/MBR odwzorowuje układ i typy partycji, integracja rozruchu oczekuje na pełną ścieżkę kopiowania |
 | FAT16/FAT32/exFAT | Istnieją podstawowe generatory FAT32/exFAT, potrzebna pełna obsługa drzewa plików i zgodność opcji |
 | UDF, ReFS, ext2/ext3/ext4 jako system docelowy | Do implementacji |
 | READ16/WRITE16, nośniki >2 TiB, UAS, wiele LUN | Do implementacji i testów |
@@ -53,4 +53,11 @@ Adapter natywny udostępnia montowanie przygotowanego woluminu, tworzenie katalo
 
 Skrypt scripts/test-native-ntfs.sh wykonuje testy C i Java/JNI na rzeczywistych woluminach NTFS w plikach. Wymaga hostowego GCC, JDK, mkntfs i ntfscat (pakiet ntfs-3g), Python 3 i narzędzi autotools. Niezależny odczyt ntfscat sprawdza zapisane treści. JVM działa z -Xcheck:jni. Zweryfikowano obsługę wyjątków z callbacków, ochronę uchwytów przy odmontowaniu, zamknięcie pozostawionych plików i ponowne montowanie po błędzie odczytu. Biblioteki Androida są linkowane z --no-undefined oraz obsługą wyrównania stron 16 KiB.
 
-Testy te dotyczą adaptera i jego połączenia z Javą. Interfejs zapisu instalatora nadal wymaga formatowania natywnego, przygotowania partycji i połączenia całej operacji wypakowywania z UEFI:NTFS.
+Testy te dotyczą adaptera i jego połączenia z Javą. Interfejs zapisu instalatora wymaga jeszcze połączenia formatowania, przygotowania partycji i całej operacji wypakowywania z UEFI:NTFS.
+
+
+## Formatter i układ instalatora Windows
+
+Formatter mkntfs z przypiętego źródła jest kompilowany do biblioteki JNI. Wykorzystuje adapter I/O partycji. Wywołania są serializowane, stan formattera jest czyszczony po każdej próbie, a błędy zapisu i synchronizacji są przekazywane do Javy. Testy obejmują szybkie i pełne formatowanie, ponowienie po błędzie, polskie znaki w etykiecie oraz sprawdzenie zawartości utworzonych woluminów niezależnym ntfscat. ntfsinfo potwierdziło wersję NTFS 3.1, sektory 512 B, klastry 4096 B i etykietę RUFUS_żółć.
+
+WindowsLayout odwzorowuje rozmieszczenie dwóch partycji z drive.c Rufusa, w tym wyrównanie do ścieżki i klastra. UEFI:NTFS w GPT ma typ Microsoft Basic Data i atrybut No Drive Letter. Testy kontrolują oba schematy, CRC nagłówków GPT, oryginalny kod MBR oraz identyczną zawartość obrazu UEFI:NTFS. Obrazy w app/src/main/assets/rufus pochodzą z res/uefi i src/ms-sys/inc źródłowej rewizji Rufusa. Nowa ścieżka instalacyjna oczekuje jeszcze na integrację w interfejsie aplikacji.

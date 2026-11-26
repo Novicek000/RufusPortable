@@ -49,6 +49,18 @@ int main(int argc, char **argv)
         .context = &disk, .length = info.st_size, .sector_size = 512,
         .read = read_disk, .write = write_disk, .sync = sync_disk
     };
+    int64_t original_size = device.length;
+    device.length = 16 * 1024 * 1024;
+    assert(rufus_ntfs_format(&device, "FULL_TEST", 4096, 2048, 0) == 0);
+    device.length = original_size;
+    disk.failed_write = 1;
+    assert(rufus_ntfs_format(&device, "FAILED", 4096, 2048, 1) == -1);
+    disk.failed_write = 0;
+    assert(rufus_ntfs_format(&device, "RUFUS_TEST", 4096, 2048, 1) == 0);
+    unsigned char boot[512];
+    assert(pread(disk.fd, boot, sizeof(boot), 0) == sizeof(boot));
+    assert(memcmp(boot + 3, "NTFS    ", 8) == 0);
+    assert(boot[28] == 0 && boot[29] == 8 && boot[30] == 0 && boot[31] == 0);
     rufus_ntfs *volume = rufus_ntfs_mount(&device);
     assert(volume);
     uint16_t directory[] = {'s','o','u','r','c','e','s'};
@@ -78,6 +90,6 @@ int main(int argc, char **argv)
     assert(volume);
     assert(rufus_ntfs_unmount(volume) == 0);
     close(disk.fd);
-    puts("NTFS callback write, Unicode directories, lifetime and failure tests passed");
+    puts("NTFS native quick/full formatting, retry, write, Unicode and lifetime tests passed");
     return 0;
 }

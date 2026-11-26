@@ -16,6 +16,13 @@ final class NtfsVolume implements Closeable {
         handle = mount(partition, partition.size(), partition.sectorSize());
     }
 
+    static void format(BlockDevice partition, String label, int clusterSize,
+            long partitionStartSector, boolean quick) throws IOException {
+        format(partition, partition.size(), partition.sectorSize(),
+                label.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                clusterSize, partitionStartSector, quick);
+    }
+
     private void requireOpen() throws IOException {
         if (handle == 0) {
             throw new IOException("Wolumin NTFS jest zamknięty.");
@@ -120,6 +127,8 @@ final class NtfsVolume implements Closeable {
         }
     }
 
+    private static native void format(BlockDevice device, long size, int sectorSize,
+            byte[] label, int clusterSize, long partitionStartSector, boolean quick) throws IOException;
     private static native long mount(BlockDevice device, long size, int sectorSize) throws IOException;
     private static native void mkdir(long volume, String path) throws IOException;
     private static native long create(long volume, String path) throws IOException;

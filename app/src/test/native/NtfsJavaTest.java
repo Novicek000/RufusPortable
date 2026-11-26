@@ -7,7 +7,7 @@ import java.nio.channels.*;
 public final class NtfsJavaTest {
     private static final class FileDevice implements BlockDevice,Closeable {
         final RandomAccessFile file;
-        boolean failRead;
+        boolean failRead, failWrite, failSync;
         FileDevice(String name) throws IOException {file=new RandomAccessFile(name,"rw");}
         public long size() {try{return file.length();}catch(IOException e){throw new UncheckedIOException(e);}}
         public int sectorSize() {return 512;}
@@ -15,12 +15,35 @@ public final class NtfsJavaTest {
             if(failRead)throw new IOException("injected block read failure");
             file.seek(offset);file.readFully(data);
         }
-        public void write(long offset,byte[] data) throws IOException {file.seek(offset);file.write(data);}
-        public void sync() throws IOException {file.getFD().sync();}
+        public void write(long offset,byte[] data) throws IOException {
+            if(failWrite)throw new IOException("injected block write failure");
+            file.seek(offset);file.write(data);
+        }
+        public void sync() throws IOException {
+            if(failSync)throw new IOException("injected block sync failure");
+            file.getFD().sync();
+        }
         public void close() throws IOException {file.close();}
     }
     public static void main(String[] args) throws Exception {
         try(FileDevice device=new FileDevice(args[0])) {
+            device.failWrite=true;
+            try {
+                NtfsVolume.format(device,"FAILED",4096,2048,true);
+                throw new AssertionError("format succeeded after callback failure");
+            } catch(IOException expected) {
+                if(!"injected block write failure".equals(expected.getMessage()))throw expected;
+            }
+            device.failWrite=false;
+            device.failSync=true;
+            try {
+                NtfsVolume.format(device,"FAILED_SYNC",4096,2048,true);
+                throw new AssertionError("format succeeded after synchronization failure");
+            } catch(IOException expected) {
+                if(!"injected block sync failure".equals(expected.getMessage()))throw expected;
+            }
+            device.failSync=false;
+            NtfsVolume.format(device,"RUFUS_żółć",4096,2048,true);
             device.failRead=true;
             try {
                 new NtfsVolume(device);
