@@ -1,0 +1,10 @@
+<resources>
+    <color name="primary">#A6D7B4</color>
+    <color name="on_primary">#0E3826</color>
+    <color name="container">#34593D</color>
+    <color name="paper">#141B17</color>
+    <color name="ink">#E3EBE1</color>
+    <color name="panel">#232F27</color>
+    <color name="muted">#CADCCF</color>
+    <color name="blue">#2D415C</color>
+</resources>

@@ -1,0 +1,9 @@
+<resources>
+    <style name="AppTheme" parent="Theme.Material3Expressive.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/primary</item>
+        <item name="colorOnPrimary">@color/on_primary</item>
+        <item name="colorPrimaryContainer">@color/container</item>
+        <item name="android:windowBackground">@color/paper</item>
+        <item name="android:fontFamily">sans</item>
+    </style>
+</resources>
