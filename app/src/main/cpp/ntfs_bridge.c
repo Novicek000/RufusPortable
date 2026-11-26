@@ -31,6 +31,7 @@ struct rufus_ntfs_file {
     rufus_ntfs *owner;
     ntfs_inode *inode;
     ntfs_attr *attribute;
+    int writable;
 };
 
 typedef struct {
@@ -248,7 +249,7 @@ rufus_ntfs *rufus_ntfs_mount(rufus_disk *disk)
     return result;
 }
 
-static ntfs_inode *create_entry(rufus_ntfs *volume, const uint16_t *path, size_t length, mode_t type)
+static ntfs_inode *resolve_entry(rufus_ntfs *volume, const uint16_t *path, size_t length, mode_t create_mode)
 {
     if (!volume || !path || !length || length > 32767 || path[0] == '/') {
         errno = EINVAL;
@@ -276,7 +277,13 @@ static ntfs_inode *create_entry(rufus_ntfs *volume, const uint16_t *path, size_t
         for (size_t i = 0; i < count; i++)
             name[i] = cpu_to_le16(path[start + i]);
         if (pos == length) {
-            ntfs_inode *created = ntfs_create(parent, const_cpu_to_le32(0), name, count, type);
+            ntfs_inode *created;
+            if (create_mode) {
+                created = ntfs_create(parent, const_cpu_to_le32(0), name, count, create_mode);
+            } else {
+                u64 reference = ntfs_inode_lookup_by_name(parent, name, count);
+                created = reference == (u64)-1 ? NULL : ntfs_inode_open(volume->volume, reference);
+            }
             int saved = errno;
             int closed = ntfs_inode_close(parent);
             if (created && closed != 0) {
@@ -313,17 +320,18 @@ static ntfs_inode *create_entry(rufus_ntfs *volume, const uint16_t *path, size_t
 
 int rufus_ntfs_mkdir(rufus_ntfs *volume, const uint16_t *path, size_t length)
 {
-    ntfs_inode *inode = create_entry(volume, path, length, S_IFDIR);
+    ntfs_inode *inode = resolve_entry(volume, path, length, S_IFDIR);
     return inode ? ntfs_inode_close(inode) : -1;
 }
 
-rufus_ntfs_file *rufus_ntfs_create(rufus_ntfs *volume, const uint16_t *path, size_t length)
+static rufus_ntfs_file *open_file(rufus_ntfs *volume, const uint16_t *path, size_t length, int creating)
 {
     rufus_ntfs_file *file = calloc(1, sizeof(*file));
     if (!file)
         return NULL;
     file->owner = volume;
-    file->inode = create_entry(volume, path, length, S_IFREG);
+    file->writable = creating;
+    file->inode = resolve_entry(volume, path, length, creating ? S_IFREG : 0);
     if (file->inode)
         file->attribute = ntfs_attr_open(file->inode, AT_DATA, AT_UNNAMED, 0);
     if (!file->attribute) {
@@ -338,10 +346,33 @@ rufus_ntfs_file *rufus_ntfs_create(rufus_ntfs *volume, const uint16_t *path, siz
     return file;
 }
 
+rufus_ntfs_file *rufus_ntfs_create(rufus_ntfs *volume, const uint16_t *path, size_t length)
+{
+    return open_file(volume, path, length, 1);
+}
+
+rufus_ntfs_file *rufus_ntfs_open(rufus_ntfs *volume, const uint16_t *path, size_t length)
+{
+    return open_file(volume, path, length, 0);
+}
+
+int64_t rufus_ntfs_read(rufus_ntfs_file *file, int64_t offset, void *data, size_t length)
+{
+    if (!file || offset < 0 || length > (uint64_t)(INT64_MAX - offset) || (length && !data)) {
+        errno = EINVAL;
+        return -1;
+    }
+    return ntfs_attr_pread(file->attribute, offset, length, data);
+}
+
 int rufus_ntfs_write(rufus_ntfs_file *file, int64_t offset, const void *data, size_t length)
 {
     if (!file || offset < 0 || length > (uint64_t)(INT64_MAX - offset) || (length && !data)) {
         errno = EINVAL;
+        return -1;
+    }
+    if (!file->writable) {
+        errno = EROFS;
         return -1;
     }
     s64 written = ntfs_attr_pwrite(file->attribute, offset, length, data);

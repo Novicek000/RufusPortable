@@ -10,7 +10,7 @@ final class NtfsVolume implements Closeable {
     }
 
     private long handle;
-    private final Set<NtfsFile> files = new HashSet<>();
+    private final Set<Closeable> files = new HashSet<>();
 
     NtfsVolume(BlockDevice partition) throws IOException {
         handle = mount(partition, partition.size(), partition.sectorSize());
@@ -41,13 +41,20 @@ final class NtfsVolume implements Closeable {
         return file;
     }
 
+    synchronized InputStream open(String path) throws IOException {
+        requireOpen();
+        NtfsReader file = new NtfsReader(openRead(handle, path));
+        files.add(file);
+        return file;
+    }
+
     @Override
     public synchronized void close() throws IOException {
         if (handle == 0) {
             return;
         }
         IOException failure = null;
-        for (NtfsFile file : new ArrayList<>(files)) {
+        for (Closeable file : new ArrayList<>(files)) {
             try {
                 file.close();
             } catch (IOException error) {
@@ -127,6 +134,61 @@ final class NtfsVolume implements Closeable {
         }
     }
 
+    private final class NtfsReader extends InputStream {
+        private long fileHandle;
+        private long position;
+
+        NtfsReader(long handle) {
+            fileHandle = handle;
+        }
+
+        @Override
+        public int read() throws IOException {
+            byte[] data = new byte[1];
+            return read(data, 0, 1) < 0 ? -1 : data[0] & 255;
+        }
+
+        @Override
+        public int read(byte[] data, int offset, int count) throws IOException {
+            if (offset < 0 || count < 0 || offset > data.length - count) {
+                throw new IndexOutOfBoundsException();
+            }
+            synchronized (NtfsVolume.this) {
+                requireOpen();
+                if (fileHandle == 0) {
+                    throw new IOException("Plik NTFS jest zamknięty.");
+                }
+                if (count == 0) {
+                    return 0;
+                }
+                if (Thread.currentThread().isInterrupted()) {
+                    throw new InterruptedIOException();
+                }
+                int result = NtfsVolume.read(fileHandle, position, data, offset, Math.min(131072, count));
+                if (result == 0) {
+                    return -1;
+                }
+                position += result;
+                return result;
+            }
+        }
+
+        @Override
+        public void close() throws IOException {
+            synchronized (NtfsVolume.this) {
+                if (fileHandle == 0) {
+                    return;
+                }
+                long closing = fileHandle;
+                fileHandle = 0;
+                files.remove(this);
+                closeFile(closing);
+            }
+        }
+    }
+
+    private static native long openRead(long volume, String path) throws IOException;
+    private static native int read(long file, long offset, byte[] data, int start, int length) throws IOException;
     private static native void format(BlockDevice device, long size, int sectorSize,
             byte[] label, int clusterSize, long partitionStartSector, boolean quick) throws IOException;
     private static native long mount(BlockDevice device, long size, int sectorSize) throws IOException;

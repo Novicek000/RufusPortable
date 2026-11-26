@@ -39,7 +39,11 @@ link_options=(-Wl,--gc-sections -Wl,--no-undefined -pthread)
 "$JAVA_HOME/bin/javac" -d "$test_dir" \
     "$project_dir/app/src/main/java/pl/rufusportable/BlockDevice.java" \
     "$project_dir/app/src/main/java/pl/rufusportable/NtfsVolume.java" \
-    "$tests_dir/NtfsJavaTest.java"
+    "$project_dir/app/src/main/java/pl/rufusportable/IsoTree.java" \
+    "$project_dir/app/src/main/java/pl/rufusportable/WindowsLayout.java" \
+    "$project_dir/app/src/main/java/pl/rufusportable/DiskLayout.java" \
+    "$project_dir/app/src/main/java/pl/rufusportable/WindowsInstaller.java" \
+    "$tests_dir/NtfsJavaTest.java" "$tests_dir/WindowsInstallerTest.java"
 for name in c jni; do
     truncate -s 0 "$test_dir/$name.img"
     truncate -s 256M "$test_dir/$name.img"
@@ -48,6 +52,9 @@ done
 "$test_dir/ntfs-bridge-test" "$test_dir/c.img"
 "$JAVA_HOME/bin/java" -Xcheck:jni -Djava.library.path="$test_dir" \
     -cp "$test_dir" pl.rufusportable.NtfsJavaTest "$test_dir/jni.img"
+"$JAVA_HOME/bin/java" -Xcheck:jni -Djava.library.path="$test_dir" \
+    -cp "$test_dir" pl.rufusportable.WindowsInstallerTest "$test_dir/windows.img" \
+    "$project_dir/app/src/main/assets/rufus"
 "${NTFSCAT:-ntfscat}" "$test_dir/c.img" /sources/test.bin > "$test_dir/c.bin"
 "${NTFSCAT:-ntfscat}" "$test_dir/jni.img" /efi/boot/payload.bin > "$test_dir/jni.bin"
 "${NTFSCAT:-ntfscat}" "$test_dir/jni.img" /unfinished.bin > "$test_dir/closed.bin"

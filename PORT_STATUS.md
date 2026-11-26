@@ -13,7 +13,7 @@ Celem jest zgodność funkcjonalna z Rufusem z rewizji 8337c3e7e534b5d5b5045dd8e
 | ISO 9660 i Joliet | Czytnik drzewa i ekstentów, test rzeczywistego Alpine ISO |
 | UDF | Czytnik partycji fizycznych, alokacji krótkiej/długiej/osadzonej i fragmentów, test rzeczywistego Windows 11 ISO |
 | NTFS | Biblioteka pbatard/ntfs-3g i JNI dla czterech ABI w APK; tworzenie katalogów, zapis plików i natywne szybkie/pełne formatowanie przez adapter dyskowy sprawdzone; integracja instalatora w toku |
-| UEFI:NTFS | Oryginalny obraz Rufusa w zasobach aplikacji; generator GPT/MBR odwzorowuje układ i typy partycji, integracja rozruchu oczekuje na pełną ścieżkę kopiowania |
+| UEFI:NTFS | Oryginalny obraz Rufusa w zasobach aplikacji; generator GPT/MBR odwzorowuje układ i typy partycji, wypakowywanie i łańcuch UEFI:NTFS zintegrowane, start Windows PE potwierdzony w QEMU |
 | FAT16/FAT32/exFAT | Istnieją podstawowe generatory FAT32/exFAT, potrzebna pełna obsługa drzewa plików i zgodność opcji |
 | UDF, ReFS, ext2/ext3/ext4 jako system docelowy | Do implementacji |
 | READ16/WRITE16, nośniki >2 TiB, UAS, wiele LUN | Do implementacji i testów |
@@ -22,7 +22,7 @@ Celem jest zgodność funkcjonalna z Rufusem z rewizji 8337c3e7e534b5d5b5045dd8e
 
 | Funkcja oryginału | Stan |
 | --- | --- |
-| Standardowy instalator Windows wypakowany na NTFS | Do integracji odczytu UDF, NTFS i UEFI:NTFS |
+| Standardowy instalator Windows wypakowany na NTFS | Ścieżka jest podłączona w aplikacji, pliki kopiowane i weryfikowane po ponownym montowaniu; WinPE uruchomiony w QEMU, pełna instalacja do sprawdzenia |
 | Windows To Go | Do implementacji operacji WIM, boot configuration i partycji ESP/MSR |
 | Personalizacja instalatora Windows i unattended XML | Do implementacji |
 | FreeDOS | Podstawowy start BIOS sprawdzony w QEMU |
@@ -53,11 +53,20 @@ Adapter natywny udostępnia montowanie przygotowanego woluminu, tworzenie katalo
 
 Skrypt scripts/test-native-ntfs.sh wykonuje testy C i Java/JNI na rzeczywistych woluminach NTFS w plikach. Wymaga hostowego GCC, JDK, mkntfs i ntfscat (pakiet ntfs-3g), Python 3 i narzędzi autotools. Niezależny odczyt ntfscat sprawdza zapisane treści. JVM działa z -Xcheck:jni. Zweryfikowano obsługę wyjątków z callbacków, ochronę uchwytów przy odmontowaniu, zamknięcie pozostawionych plików i ponowne montowanie po błędzie odczytu. Biblioteki Androida są linkowane z --no-undefined oraz obsługą wyrównania stron 16 KiB.
 
-Testy te dotyczą adaptera i jego połączenia z Javą. Interfejs zapisu instalatora wymaga jeszcze połączenia formatowania, przygotowania partycji i całej operacji wypakowywania z UEFI:NTFS.
+Testy te dotyczą adaptera i jego połączenia z Javą. Interfejs zapisu instalatora korzysta z natywnego formattera, kopiowania plików i UEFI:NTFS. Pozostaje pełna weryfikacja instalacji i pozostałych funkcji z tabeli.
 
 
 ## Formatter i układ instalatora Windows
 
 Formatter mkntfs z przypiętego źródła jest kompilowany do biblioteki JNI. Wykorzystuje adapter I/O partycji. Wywołania są serializowane, stan formattera jest czyszczony po każdej próbie, a błędy zapisu i synchronizacji są przekazywane do Javy. Testy obejmują szybkie i pełne formatowanie, ponowienie po błędzie, polskie znaki w etykiecie oraz sprawdzenie zawartości utworzonych woluminów niezależnym ntfscat. ntfsinfo potwierdziło wersję NTFS 3.1, sektory 512 B, klastry 4096 B i etykietę RUFUS_żółć.
 
-WindowsLayout odwzorowuje rozmieszczenie dwóch partycji z drive.c Rufusa, w tym wyrównanie do ścieżki i klastra. UEFI:NTFS w GPT ma typ Microsoft Basic Data i atrybut No Drive Letter. Testy kontrolują oba schematy, CRC nagłówków GPT, oryginalny kod MBR oraz identyczną zawartość obrazu UEFI:NTFS. Obrazy w app/src/main/assets/rufus pochodzą z res/uefi i src/ms-sys/inc źródłowej rewizji Rufusa. Nowa ścieżka instalacyjna oczekuje jeszcze na integrację w interfejsie aplikacji.
+WindowsLayout odwzorowuje rozmieszczenie dwóch partycji z drive.c Rufusa, w tym wyrównanie do ścieżki i klastra. UEFI:NTFS w GPT ma typ Microsoft Basic Data i atrybut No Drive Letter. Testy kontrolują oba schematy, CRC nagłówków GPT, oryginalny kod MBR oraz identyczną zawartość obrazu UEFI:NTFS. Obrazy w app/src/main/assets/rufus pochodzą z res/uefi i src/ms-sys/inc źródłowej rewizji Rufusa. Nowa ścieżka instalacyjna jest dostępna przez przycisk zapisu w trybie plikowym.
+
+
+## Wypakowanie i rozruch Windows PE
+
+Bieżąca gałąź wykorzystuje natywną ścieżkę NTFS w interfejsie Androida. Kod i obrazy rozruchowe Ventoya zostały usunięte. Formatowanie NTFS, kopiowanie katalogów i plików z wybranego dokumentu oraz instalowanie kodu rozruchowego Rufusa są połączone. Weryfikacja po ponownym otwarciu woluminu sprawdza długości i SHA-256 plików. Testy obejmują także wykrywanie uszkodzonego odczytu. Testy planu uwzględniają install.wim większy niż 4 GiB, brakujące katalogi, duplikaty nazw i ścieżki wychodzące poza wolumin.
+
+Test rozruchu użył 1071 wpisów i 885 781 214 bajtów plików oficjalnego Windows 11 Enterprise Evaluation, odczytanych bezpośrednio z UDF. Dane zapisano przez Java/JNI/NTFS do obrazu dysku i zweryfikowano SHA-256. UEFI:NTFS 2.8 znalazł partycję NTFS, załadował sterownik NTFS 1.9 i uruchomił Microsoft Windows Boot Manager. Windows PE doszedł do interfejsu Windows 11 Setup w QEMU/OVMF.
+
+Ze względu na miejsce w środowisku testowy obraz rozruchowy pomijał sources/install.wim. Setup pokazał ekran ładowania sterownika. Ten test potwierdza łańcuch rozruchu i start WinPE. Pełna instalacja, rzeczywiste skopiowanie całego install.wim i pozostałe opcje Rufusa wymagają dalszej weryfikacji.

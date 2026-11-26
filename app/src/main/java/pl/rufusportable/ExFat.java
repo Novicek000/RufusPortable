@@ -20,7 +20,7 @@ final class ExFat {
     static boolean validLabel(String volume) {
         return !volume.isEmpty() && volume.length()<=11 && !volume.matches(".*[\\p{Cntrl}/:*?\"<>|\\\\].*");
     }
-    static void add(DiskLayout disk,VentoyLayout.Assets assets,long sectors,int spc,String label,String name,
+    static void add(DiskLayout disk,VolumeResources.Assets assets,long sectors,int spc,String label,String name,
                     long length,DiskLayout.Source source) throws IOException {
         if (spc!=64 && spc!=256 && spc!=512) throw new IOException("Nieobsługiwany rozmiar klastra.");
         int cluster=spc*SECTOR;
@@ -33,9 +33,9 @@ final class ExFat {
         int used=file-2+ceil(length,cluster);
         if (used>clusters) throw new IOException("Brak miejsca na ISO, strukturę exFAT i partycję rozruchową.");
         byte[] boot=new byte[12*SECTOR];
-        ByteBuffer b=VentoyLayout.little(boot);
+        ByteBuffer b=VolumeResources.little(boot);
         b.put((byte)0xeb).put((byte)0x76).put((byte)0x90).put("EXFAT   ".getBytes(StandardCharsets.US_ASCII));
-        b.position(64); b.putLong(VentoyLayout.FIRST).putLong(sectors).putInt(FAT).putInt(fatSectors)
+        b.position(64); b.putLong(2048).putLong(sectors).putInt(FAT).putInt(fatSectors)
          .putInt(heap).putInt(clusters).putInt(root).putInt(UUID.randomUUID().hashCode()).putShort((short)256)
          .putShort((short)0).put((byte)9).put((byte)Integer.numberOfTrailingZeros(spc))
          .put((byte)1).put((byte)128).put((byte)(100L*used/clusters));
@@ -44,11 +44,11 @@ final class ExFat {
         int sum=0;
         for (int i=0;i<11*SECTOR;i++) if (i!=106 && i!=107 && i!=112) sum=Integer.rotateRight(sum,1)+(boot[i]&255);
         for (int i=11*SECTOR;i<boot.length;i+=4) b.putInt(i,sum);
-        long base=(long)VentoyLayout.FIRST*SECTOR;
+        long base=(long)2048*SECTOR;
         disk.add(base+(long)heap*SECTOR+(long)(file-2)*cluster,length,source);
         disk.add(base,boot); disk.add(base+boot.length,boot);
         byte[] fat=new byte[4*(root+1)];
-        ByteBuffer f=VentoyLayout.little(fat);
+        ByteBuffer f=VolumeResources.little(fat);
         f.putInt(0xfffffff8).putInt(-1);
         for (int i=2;i<upcase;i++) f.putInt(i+1==upcase?-1:i+1);
         f.putInt(-1).putInt(-1);
@@ -58,10 +58,10 @@ final class ExFat {
         Arrays.fill(bitmap,0,used/8,(byte)255);
         if (used%8!=0) bitmap[used/8]=(byte)((1<<(used%8))-1);
         disk.add(data,bitmap);
-        byte[] table=VentoyLayout.read(assets,"upcase.bin",5836,false);
+        byte[] table=VolumeResources.read(assets,"upcase.bin",5836);
         disk.add(data+(long)(upcase-2)*cluster,table);
         byte[] directory=new byte[cluster];
-        ByteBuffer d=VentoyLayout.little(directory);
+        ByteBuffer d=VolumeResources.little(directory);
         String volume=label.trim();
         if (!validLabel(volume))
             throw new IOException("Etykieta exFAT musi mieć od 1 do 11 dozwolonych znaków.");

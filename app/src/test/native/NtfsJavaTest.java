@@ -60,6 +60,13 @@ public final class NtfsJavaTest {
                     for(int i=0;i<data.length;i++)data[i]=(byte)(i*17+9);
                     file.write(data,5,169993);
                 }
+                try(InputStream in=volume.open("efi/boot/payload.bin")) {
+                    byte[] actual=in.readAllBytes();
+                    byte[] expected=new byte[169993];
+                    for(int i=0;i<expected.length;i++)expected[i]=(byte)((i+5)*17+9);
+                    if(!java.util.Arrays.equals(actual,expected))throw new AssertionError("native read mismatch");
+                    if(in.read()!=-1 || in.read(new byte[1],0,0)!=0)throw new AssertionError("EOF handling");
+                }
                 afterClose=volume.create("unfinished.bin");
                 afterClose.write(new byte[]{2,4,6,8});
                 // Closing the owning volume must close its remaining files as well.

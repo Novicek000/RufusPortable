@@ -120,7 +120,7 @@ final class ImageFile {
             }
         } catch (EOFException e) { throw new IOException("Nagłówek obrazu jest niekompletny.",e); }
         hybrid=sector[510]==0x55 && sector[511]==(byte)0xaa;
-        if (iso && !hybrid) { partition="ISO · tryb instalacyjny Ventoy"; return; }
+        if (iso && !hybrid) { partition="ISO · tryb plikowy"; return; }
         if (hybrid) {
             Properties types=new Properties();
             try (InputStream in=ctx.getResources().openRawResource(R.raw.mbr_types)) { types.load(in); }

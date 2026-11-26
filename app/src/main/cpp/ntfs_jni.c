@@ -210,6 +210,51 @@ JNIEXPORT jlong JNICALL Java_pl_rufusportable_NtfsVolume_create(
     return (jlong)(intptr_t)file;
 }
 
+JNIEXPORT jlong JNICALL Java_pl_rufusportable_NtfsVolume_openRead(
+        JNIEnv *env, jclass type, jlong handle, jstring path)
+{
+    (void)type;
+    java_volume *volume = (java_volume *)(intptr_t)handle;
+    if (!volume || !path) {
+        errno = EINVAL;
+        io_error(env);
+        return 0;
+    }
+    const jchar *name = (*env)->GetStringChars(env, path, NULL);
+    if (!name)
+        return 0;
+    rufus_ntfs_file *file = rufus_ntfs_open(volume->volume, name, (*env)->GetStringLength(env, path));
+    (*env)->ReleaseStringChars(env, path, name);
+    if (!file)
+        io_error(env);
+    return (jlong)(intptr_t)file;
+}
+
+JNIEXPORT jint JNICALL Java_pl_rufusportable_NtfsVolume_read(
+        JNIEnv *env, jclass type, jlong handle, jlong offset, jbyteArray data, jint start, jint length)
+{
+    (void)type;
+    if (!handle || !data || start < 0 || length < 0 || length > 131072 ||
+            start > (*env)->GetArrayLength(env, data) - length) {
+        errno = EINVAL;
+        io_error(env);
+        return -1;
+    }
+    unsigned char *buffer = malloc(length ? (size_t)length : 1);
+    if (!buffer) {
+        io_error(env);
+        return -1;
+    }
+    int64_t result = rufus_ntfs_read((rufus_ntfs_file *)(intptr_t)handle, offset, buffer, length);
+    if (result < 0) {
+        io_error(env);
+    } else if (!(*env)->ExceptionCheck(env)) {
+        (*env)->SetByteArrayRegion(env, data, start, result, (jbyte *)buffer);
+    }
+    free(buffer);
+    return result;
+}
+
 JNIEXPORT void JNICALL Java_pl_rufusportable_NtfsVolume_write(
         JNIEnv *env, jclass type, jlong handle, jlong offset, jbyteArray data, jint start, jint length)
 {

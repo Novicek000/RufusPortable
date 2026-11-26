@@ -37,8 +37,9 @@ public class MainActivity extends AppCompatActivity {
     private String installed, newTag;
     private MaterialButton settings, hash, other;
     private boolean gpt, verifyWrite=true, useIso, testMedia, dos;
-    private int clusterSectors=256;
-    private String volumeLabel="Ventoy";
+    private int ntfsClusterSize=4096;
+    private boolean quickFormat=true;
+    private String volumeLabel="RUFUS";
     private Uri pickedUri;
     private Future<?> preparation;
 
@@ -73,7 +74,7 @@ public class MainActivity extends AppCompatActivity {
         androidx.core.content.ContextCompat.registerReceiver(this, receiver, f, androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED);
         if (state!=null) {
             gpt=state.getBoolean("gpt"); verifyWrite=state.getBoolean("verify",true);
-            clusterSectors=state.getInt("cluster",256); volumeLabel=state.getString("label","Ventoy");
+            ntfsClusterSize=state.getInt("ntfsCluster",4096); quickFormat=state.getBoolean("quick",true); volumeLabel=state.getString("label","RUFUS");
             String saved=state.getString("source");
             testMedia=state.getBoolean("testMedia");
             if (saved!=null) select(Uri.parse(saved),state.getBoolean("iso"));
@@ -86,7 +87,7 @@ public class MainActivity extends AppCompatActivity {
         if (pickedUri!=null) state.putString("source",pickedUri.toString());
         state.putBoolean("builtin",image!=null && image.uri==null); state.putBoolean("dos",dos); state.putBoolean("testMedia",testMedia);
         state.putBoolean("iso",useIso); state.putBoolean("gpt",gpt); state.putBoolean("verify",verifyWrite);
-        state.putInt("cluster",clusterSectors); state.putString("label",volumeLabel);
+        state.putInt("ntfsCluster",ntfsClusterSize); state.putBoolean("quick",quickFormat); state.putString("label",volumeLabel);
     }
 
     private int dp(float value) { return Math.round(getResources().getDisplayMetrics().density * value); }
@@ -227,7 +228,7 @@ public class MainActivity extends AppCompatActivity {
     private void showImage() {
         imageName.setText(image.name);
         if (image.uri==null) { imageMeta.setText("MBR · FAT32 · "+(dos?"BIOS":"formatowanie")); return; }
-        imageMeta.setText((image.length<0?"Rozmiar nieznany":size(image.length))+" · "+(useIso?"ISO przez Ventoy · "+(gpt?"GPT":"MBR")+" · exFAT":image.partition+" · DD"));
+        imageMeta.setText((image.length<0?"Rozmiar nieznany":size(image.length))+" · "+(useIso?"ISO · tryb plikowy · "+(gpt?"GPT":"MBR")+" · NTFS":image.partition+" · DD"));
     }
     private Spinner choices(LinearLayout box,String title,String[] items,int selected) {
         TextView text=label(box,title,16,true);
@@ -240,11 +241,15 @@ public class MainActivity extends AppCompatActivity {
     private void options() {
         LinearLayout box=column(); pad(box,20,8);
         boolean switchable=image.iso && image.hybrid;
-        Spinner mode=choices(box,"Metoda zapisu",switchable?new String[]{"Sektorowa (DD)","ISO przez Ventoy"}:
-                new String[]{image.uri==null?image.name:useIso?"ISO przez Ventoy":"Sektorowa (DD)"},switchable && useIso?1:0);
+        Spinner mode=choices(box,"Metoda zapisu",switchable?new String[]{"Sektorowa (DD)","ISO · tryb plikowy"}:
+                new String[]{image.uri==null?image.name:useIso?"ISO · tryb plikowy":"Sektorowa (DD)"},switchable && useIso?1:0);
         LinearLayout isoBox=column(); box.addView(isoBox);
         Spinner scheme=choices(isoBox,"Schemat partycji",new String[]{"MBR","GPT"},gpt?1:0);
-        Spinner clusters=choices(isoBox,"Klaster exFAT",new String[]{"32 KiB","128 KiB","256 KiB"},clusterSectors==64?0:clusterSectors==256?1:2);
+        int[] clusterSizes={512,1024,2048,4096,8192,16384,32768,65536,131072,262144,524288,1048576,2097152};
+        int clusterIndex=3;
+        for(int i=0;i<clusterSizes.length;i++) if(clusterSizes[i]==ntfsClusterSize) clusterIndex=i;
+        Spinner clusters=choices(isoBox,"Klaster NTFS",new String[]{"512 B","1 KiB","2 KiB","4 KiB","8 KiB","16 KiB","32 KiB","64 KiB","128 KiB","256 KiB","512 KiB","1 MiB","2 MiB"},clusterIndex);
+        CheckBox quick=new CheckBox(this); quick.setText("Szybkie formatowanie"); quick.setChecked(quickFormat); isoBox.addView(quick);
         LinearLayout volumeBox=column(); box.addView(volumeBox);
         volumeBox.setVisibility(useIso || image.uri==null?View.VISIBLE:View.GONE);
         TextView caption=label(volumeBox,"Etykieta woluminu",16,true);
@@ -267,10 +272,10 @@ public class MainActivity extends AppCompatActivity {
         dialog.getButton(-1).setOnClickListener(v->{
             boolean iso=switchable?mode.getSelectedItemPosition()==1:useIso;
             String label=volume.getText().toString().trim();
-            if (iso && !ExFat.validLabel(label)) { volume.setError("Wpisz od 1 do 11 znaków dozwolonych w etykiecie exFAT."); return; }
+            if (iso && !WindowsInstaller.validLabel(label)) { volume.setError("Etykieta NTFS może mieć do 32 znaków."); return; }
             if (image.uri==null && !label.matches("[a-zA-Z0-9 _-]{1,11}")) {volume.setError("Wpisz do 11 liter ASCII, cyfr, spacji, - lub _."); return;}
             useIso=iso; if (iso || image.uri==null) volumeLabel=label; testMedia=surface.isChecked();
-            gpt=scheme.getSelectedItemPosition()==1; clusterSectors=new int[]{64,256,512}[clusters.getSelectedItemPosition()];
+            gpt=scheme.getSelectedItemPosition()==1; ntfsClusterSize=clusterSizes[clusters.getSelectedItemPosition()]; quickFormat=quick.isChecked();
             verifyWrite=verify.isChecked(); showImage(); dialog.dismiss();
         });
     }
@@ -355,10 +360,10 @@ public class MainActivity extends AppCompatActivity {
             });
             return;
         }
-        if (image.length>capacity) { status.setText("Obraz jest większy od nośnika. Wybierz większy pendrive."); return; }
+        if (!useIso && image.length>capacity) { status.setText("Obraz jest większy od nośnika. Wybierz większy pendrive."); return; }
         UsbDevice selected=target;
         String method=image.uri==null?"MBR · FAT32 · "+volumeLabel:
-                useIso?(gpt?"GPT":"MBR")+" · exFAT · "+volumeLabel:"Zapis sektorowy DD";
+                useIso?(gpt?"GPT":"MBR")+" · NTFS · "+volumeLabel:"Zapis sektorowy DD";
         String confirmation="\n\n"+method+(testMedia?"\nPełny test zapisu i odczytu całego nośnika.":"")
                 +"\nZapis zastąpi dane na tym nośniku."
                 +(image.uri!=null?" Plik źródłowy musi znajdować się poza wybranym pendrivem.":"")
@@ -385,9 +390,18 @@ public class MainActivity extends AppCompatActivity {
                 if (disk.capacity!=expectedCapacity) throw new IOException("Zmieniła się pojemność urządzenia. Wybierz nośnik ponownie.");
                 DiskLayout.Source source=()->input.open(this);
                 DiskLayout layout;
+                WindowsLayout windowsLayout=null;
+                WindowsInstaller windowsInstaller=null;
+                byte[] bootPrefix=null,bootCode=null;
                 if (input.uri==null) layout=Fat32.create(n->getAssets().open("freedos/"+n),disk.capacity,disk.blockSize,dos,volumeLabel);
-                else if (useIso) layout=VentoyLayout.create(n->getAssets().open("ventoy/"+n),disk.capacity,disk.blockSize,
-                        gpt,volumeLabel,clusterSectors,input.name,input.length,source);
+                else if (useIso) {
+                    if (!WindowsInstaller.validLabel(volumeLabel)) throw new IOException("Nieprawidłowa etykieta NTFS.");
+                    windowsLayout=WindowsLayout.create(disk.capacity,disk.blockSize,gpt,ntfsClusterSize,
+                            bootResource("uefi-ntfs.img"),bootResource("mbr_win7.bin"));
+                    windowsInstaller=new WindowsInstaller(input.contents(this),windowsLayout.mainLength,ntfsClusterSize);
+                    bootPrefix=bootResource("br_ntfs_0x0.bin"); bootCode=bootResource("br_ntfs_0x54.bin");
+                    layout=windowsLayout.metadata;
+                }
                 else {layout=new DiskLayout(); layout.add(0,input.length,source);}
                 layout.validate(disk.capacity,disk.blockSize);
                 if (testMedia) {
@@ -412,12 +426,44 @@ public class MainActivity extends AppCompatActivity {
                         });
                     }
                 },verifyWrite);
+                if (windowsInstaller!=null) {
+                    BlockDevice raw=disk.partition(WindowsLayout.MAIN_START*512,windowsLayout.mainLength);
+                    BlockDevice partition=new BlockDevice() {
+                        public long size() {return raw.size();}
+                        public int sectorSize() {return raw.sectorSize();}
+                        private void check() throws IOException {
+                            if (cancel || Thread.currentThread().isInterrupted()) throw new InterruptedIOException("Przerwano operację.");
+                        }
+                        public void read(long offset,byte[] data) throws IOException {check();raw.read(offset,data);}
+                        public void write(long offset,byte[] data) throws IOException {check();raw.write(offset,data);}
+                        public void sync() throws IOException {raw.sync();}
+                    };
+                    final int[] lastFilePercent={-1};
+                    windowsInstaller.install(partition,entry->input.openEntry(this,entry),volumeLabel,ntfsClusterSize,
+                            quickFormat,bootPrefix,bootCode,verifyWrite,(verify,path,done,total)->{
+                                if (cancel || Thread.currentThread().isInterrupted()) throw new InterruptedIOException("Przerwano operację.");
+                                int percent=total==0?0:(int)(100.0*done/total);
+                                int step=(verify?100:0)+percent;
+                                if (lastFilePercent[0]!=step || done==0) {
+                                    lastFilePercent[0]=step;
+                                    ui(()->{status.setText((verify?"Weryfikacja":"Zapisywanie")+" · "+percent+"%\n"+path);progress.setProgressCompat(percent,percent>0);});
+                                }
+                            });
+                }
                 ui(()->{
                     progress.setProgressCompat(100,true); flashing=false; setBusy(false);
-                    status.setText((verifyWrite?"Zapis zweryfikowany przez SHA-256. ":"Zapis zakończony. ")+(useIso?"Uruchom komputer z USB i wybierz ISO w menu Ventoy.":"Możesz odłączyć nośnik."));
+                    status.setText((verifyWrite?"Zapis zweryfikowany przez SHA-256. ":"Zapis zakończony. ")+(useIso?"Uruchom komputer z przygotowanego USB.":"Możesz odłączyć nośnik."));
                 });
             } catch (Exception e) { error(e); }
         });
+    }
+    private byte[] bootResource(String name) throws IOException {
+        try (InputStream input=getAssets().open("rufus/"+name);
+             ByteArrayOutputStream bytes=new ByteArrayOutputStream()) {
+            byte[] buffer=new byte[16384]; int count;
+            while ((count=input.read(buffer))!=-1) bytes.write(buffer,0,count);
+            return bytes.toByteArray();
+        }
     }
     private void updateAction() {
         if (newTag!=null) startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(Updates.RELEASES+"/tag/"+newTag)));
