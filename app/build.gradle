@@ -29,6 +29,7 @@ def nativeNtfs = tasks.register('buildNativeNtfs', Exec) {
     environment 'ANDROID_NDK_HOME', System.getenv('ANDROID_NDK_HOME') ?:
             new File(System.getenv('ANDROID_HOME') ?: '', 'ndk/27.2.12479018').absolutePath
     inputs.file rootProject.file('scripts/build-ntfs.sh')
+    inputs.dir rootProject.file('scripts/patches/ntfs-3g')
     inputs.dir file('src/main/cpp')
     inputs.dir rootProject.file('third_party/ntfs-3g')
     outputs.dir layout.buildDirectory.dir('native/jniLibs')
