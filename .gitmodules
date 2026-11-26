@@ -1,0 +1,3 @@
+[submodule "third_party/ntfs-3g"]
+	path = third_party/ntfs-3g
+	url = https://github.com/pbatard/ntfs-3g.git

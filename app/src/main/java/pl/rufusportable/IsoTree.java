@@ -11,12 +11,22 @@ import java.util.*;
  */
 final class IsoTree {
     interface Reader { void read(long offset, byte[] destination) throws IOException; }
+    static final class Extent {
+        final long offset, length;
+        Extent(long offset,long length) { this.offset=offset; this.length=length; }
+    }
     static final class Entry {
         final String path;
         final boolean directory;
         final long offset, length;
+        final List<Extent> extents;
         Entry(String path, boolean directory, long offset, long length) {
-            this.path=path; this.directory=directory; this.offset=offset; this.length=length;
+            this(path,directory,length,Collections.singletonList(new Extent(offset,length)));
+        }
+        Entry(String path,boolean directory,long length,List<Extent> extents) {
+            this.path=path; this.directory=directory; this.length=length;
+            this.extents=Collections.unmodifiableList(new ArrayList<>(extents));
+            this.offset=extents.isEmpty()?0:extents.get(0).offset;
         }
     }
     private static final int BLOCK=2048, MAX_DIRECTORY=16*1024*1024, MAX_ENTRIES=200000;

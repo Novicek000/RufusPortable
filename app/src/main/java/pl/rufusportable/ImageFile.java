@@ -38,19 +38,43 @@ final class ImageFile {
     List<IsoTree.Entry> contents(Context ctx) throws IOException {
         try (ParcelFileDescriptor descriptor=ctx.getContentResolver().openFileDescriptor(uri,"r")) {
             if (descriptor==null) throw new IOException("Nie można otworzyć obrazu.");
-            try (FileInputStream stream=new FileInputStream(descriptor.getFileDescriptor())) {
+            try (FileInputStream stream=new ParcelFileDescriptor.AutoCloseInputStream(descriptor)) {
                 java.nio.channels.FileChannel channel=stream.getChannel();
                 long available=length>=0?length:channel.size();
-                return IsoTree.scan((offset,data)->{
+                IsoTree.Reader reader=(offset,data)->{
                     java.nio.ByteBuffer buffer=java.nio.ByteBuffer.wrap(data);
                     while (buffer.hasRemaining()) {
                         int count=channel.read(buffer,offset+buffer.position());
                         if (count<0) throw new EOFException("Niepełny obraz ISO.");
                         if (count==0) throw new IOException("Źródło nie udostępnia odczytu pozycyjnego.");
                     }
-                },available);
+                };
+                try { return UdfTree.scan(reader,available); }
+                catch (IOException udfError) {
+                    try { return IsoTree.scan(reader,available); }
+                    catch (IOException isoError) { isoError.addSuppressed(udfError); throw isoError; }
+                }
             }
         }
+    }
+    InputStream openEntry(Context ctx,IsoTree.Entry entry) throws IOException {
+        ParcelFileDescriptor descriptor=ctx.getContentResolver().openFileDescriptor(uri,"r");
+        if(descriptor==null)throw new IOException("Nie można otworzyć obrazu.");
+        FileInputStream stream=new ParcelFileDescriptor.AutoCloseInputStream(descriptor);
+        try {
+            java.nio.channels.FileChannel channel=stream.getChannel();
+            ExtentInputStream contents=new ExtentInputStream((offset,data)->{
+                java.nio.ByteBuffer buffer=java.nio.ByteBuffer.wrap(data);
+                while(buffer.hasRemaining()){
+                    int n=channel.read(buffer,offset+buffer.position());
+                    if(n<0)throw new EOFException("Niepełny plik w obrazie.");
+                    if(n==0)throw new IOException("Źródło nie udostępnia odczytu pozycyjnego.");
+                }
+            },entry);
+            return new FilterInputStream(contents){
+                @Override public void close() throws IOException {stream.close();}
+            };
+        }catch(IOException | RuntimeException e){stream.close();throw e;}
     }
     long measure(Context ctx) throws IOException {
         long count=0;
