@@ -88,34 +88,39 @@ final class UsbDisk implements Closeable {
         return connection.bulkTransfer(endpoint, data, offset, count, 10000);
     }
 
-    void flash(File image, Progress progress) throws Exception {
-        long length = image.length();
-        if (length <= 0 || length > capacity) throw new IOException("Obraz nie mieści się na nośniku.");
-        MessageDigest original = MessageDigest.getInstance("SHA-256");
-        MessageDigest actual = MessageDigest.getInstance("SHA-256");
-        byte[] data = new byte[131072];
-        try (DataInputStream source = new DataInputStream(new BufferedInputStream(new FileInputStream(image)))) {
-            for (boolean verify : new boolean[]{false, true}) {
-                for (long offset = 0; offset < length;) {
-                    progress.moved(verify, offset);
-                    int bytes = (int)Math.min(data.length, length - offset);
-                    int blocks = (bytes + blockSize - 1) / blockSize;
-                    if (!verify) {
-                        source.readFully(data, 0, bytes);
-                        Arrays.fill(data, bytes, blocks * blockSize, (byte)0);
-                        original.update(data, 0, bytes);
+    void flash(DiskLayout layout, Progress progress, boolean verifyAfterWrite) throws Exception {
+        layout.validate(capacity,blockSize);
+        MessageDigest original=MessageDigest.getInstance("SHA-256");
+        MessageDigest actual=MessageDigest.getInstance("SHA-256");
+        byte[] data=new byte[131072];
+        for (boolean verify : verifyAfterWrite ? new boolean[]{false,true} : new boolean[]{false}) {
+            long done=0;
+            for (DiskLayout.Range range:layout.ranges) {
+                try (DataInputStream source=verify ? null : new DataInputStream(range.source.open())) {
+                    for (long pos=0;pos<range.length;) {
+                        progress.moved(verify, done+pos);
+                        int bytes=(int)Math.min(data.length,range.length-pos);
+                        int blocks=(bytes+blockSize-1)/blockSize;
+                        if (!verify) {
+                            source.readFully(data,0,bytes);
+                            Arrays.fill(data,bytes,blocks*blockSize,(byte)0);
+                            if (verifyAfterWrite) original.update(data,0,blocks*blockSize);
+                        }
+                        ByteBuffer cdb=ByteBuffer.allocate(10);
+                        cdb.put((byte)(verify?0x28:0x2A)).put((byte)0)
+                           .putInt((int)((range.offset+pos)/blockSize)).put((byte)0).putShort((short)blocks);
+                        command(cdb.array(),data,blocks*blockSize,verify);
+                        if (verify) actual.update(data,0,blocks*blockSize);
+                        pos+=bytes;
                     }
-                    ByteBuffer cdb = ByteBuffer.allocate(10);
-                    cdb.put((byte)(verify ? 0x28 : 0x2A)).put((byte)0).putInt((int)(offset / blockSize))
-                            .put((byte)0).putShort((short)blocks).put((byte)0);
-                    command(cdb.array(), data, blocks * blockSize, verify);
-                    if (verify) actual.update(data, 0, bytes);
-                    offset += bytes;
+                    if (source!=null && source.read()!=-1) throw new IOException("Rozmiar źródła zmienił się podczas zapisu.");
                 }
-                if (!verify) command(new byte[]{0x35,0,0,0,0,0,0,0,0,0}, data, 0, false);
+                done+=range.length;
             }
+            if (!verify) command(new byte[]{0x35,0,0,0,0,0,0,0,0,0},data,0,false);
         }
-        if (!MessageDigest.isEqual(original.digest(), actual.digest())) throw new IOException("Weryfikacja SHA-256 wykryła różnicę.");
+        if (verifyAfterWrite && !MessageDigest.isEqual(original.digest(),actual.digest()))
+            throw new IOException("Weryfikacja SHA-256 wykryła różnicę.");
     }
 
     public void close() {

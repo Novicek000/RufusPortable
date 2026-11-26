@@ -67,31 +67,32 @@ public class DiskTest {
         });
         disk=new UsbDisk(manager,device);
     }
-    private File image(int length) throws IOException {
+    private DiskLayout image(int length) throws IOException {
         byte[] data=new byte[length]; new Random(41).nextBytes(data);
-        File f=files.newFile(); Files.write(f.toPath(),data); return f;
+        File f=files.newFile(); Files.write(f.toPath(),data);
+        DiskLayout layout=new DiskLayout(); layout.add(0,length,()->new FileInputStream(f)); return layout;
     }
     @Test public void writesMultipleChunksPadsSectorAndReadsBack() throws Exception {
         Arrays.fill(storage,(byte)87);
-        File f=image(150131);
-        disk.flash(f,(v,n)->{});
+        DiskLayout f=image(150131);
+        disk.flash(f,(v,n)->{},true);
         assertEquals(storage.length,disk.capacity);
-        assertArrayEquals(Files.readAllBytes(f.toPath()),Arrays.copyOf(storage,(int)f.length()));
-        assertEquals(0,storage[(int)f.length()]);
+        assertArrayEquals(f.ranges.get(0).source.open().readAllBytes(),Arrays.copyOf(storage,(int)f.bytes));
+        assertEquals(0,storage[(int)f.bytes]);
         assertEquals(87,storage[150528]); assertEquals(2,writes);
     }
     @Test public void detectsCorruptedReadback() throws Exception {
         corrupt=true;
-        assertTrue(assertThrows(IOException.class,()->disk.flash(image(513),(v,n)->{})).getMessage().contains("SHA-256"));
+        assertTrue(assertThrows(IOException.class,()->disk.flash(image(513),(v,n)->{},true)).getMessage().contains("SHA-256"));
     }
     @Test public void refusesOversizedImageBeforeWriting() {
-        assertThrows(IOException.class,()->disk.flash(image(storage.length+1),(v,n)->{}));
+        assertThrows(IOException.class,()->disk.flash(image(storage.length+1),(v,n)->{},true));
         assertEquals(0,writes);
     }
     @Test public void cancellationStopsNextWrite() {
         assertThrows(InterruptedIOException.class,()->disk.flash(image(140000),(v,n)->{
             if (n>0) throw new InterruptedIOException();
-        }));
+        },true));
         assertEquals(1,writes);
     }
     @Test public void comparesReleaseComponentsNumerically() {

@@ -1,32 +1,45 @@
 # RufusPortable na Androida
 
-Polskojęzyczna aplikacja do nagrywania obrazów dysków na pendrive przez USB OTG. Wymaga Androida 8.0 lub nowszego, telefonu z USB Host i pamięci masowej zgodnej z USB Bulk-Only Transport i SCSI (LUN 0). Działa bez roota.
+Polskojęzyczna aplikacja do przygotowywania pendrive’ów przez USB OTG, dla Androida 8.0 i nowszego. Działa bez roota. Potrzebne są USB Host oraz nośnik USB Mass Storage w trybie Bulk-Only Transport z SCSI (LUN 0).
 
 [Pobierz podpisany APK z najnowszego wydania](https://github.com/Novicek000/RufusPortable/releases/latest)
 
-## Nagrywanie obrazu
+## Instalator Windows 11
 
-1. Wybierz rozpakowany plik IMG, RAW, BIN, DD lub hybrydowy ISO przeznaczony do nagrania sektorowego. Telefon potrzebuje wolnego miejsca na tymczasową kopię obrazu.
-2. Podłącz pendrive przez OTG, wybierz go z listy i zezwól Androidowi na dostęp do USB. Zamknij pliki otwarte na tym nośniku.
-3. Sprawdź nazwę pliku, identyfikator USB i pojemność nośnika. **Potwierdzenie zapisu powoduje utratę dotychczasowych danych na wybranym urządzeniu.**
-4. Pozostaw aplikację otwartą i pendrive podłączony. Po zapisie aplikacja wysyła polecenie synchronizacji, odczytuje zapisany obszar i porównuje sumy SHA-256. Poczekaj na komunikat o zakończeniu. Po przerwaniu operacji powtórz zapis od początku.
+1. Wybierz rozpakowany plik ISO w systemowym selektorze. Nazwa wybranego pliku pozostaje widoczna również po błędzie. Podczas wyboru aplikacja odczytuje metadane i nagłówki obrazu. Korzysta z pliku bezpośrednio przez Android Storage Access Framework. Plik źródłowy musi znajdować się poza docelowym pendrivem.
+2. Podłącz pendrive, wybierz urządzenie i zezwól na dostęp. Dla zwykłego Windows ISO aplikacja stosuje Ventoy. W „Opcjach zapisu” można wybrać GPT lub MBR, etykietę i klaster exFAT. Nośnik musi pomieścić cały plik oraz struktury partycji i rozruchu. Pliki ISO większe niż 4 GiB są obsługiwane.
+3. Sprawdź nazwę, identyfikator i pojemność celu. **Potwierdzenie zapisu powoduje utratę danych na wybranym urządzeniu.** Pozostaw aplikację otwartą. Przy włączonej weryfikacji aplikacja odczytuje zapisane zakresy i porównuje ich SHA-256.
+4. Uruchom komputer z USB, wybierz ISO w menu Ventoy i uruchom instalator. Zgodność zależy od obrazu i firmware komputera. Przy Secure Boot obowiązują [zasady zaufania opisane przez Ventoy](https://www.ventoy.net/en/doc_secure.html).
 
-Tryb sektorowy odpowiada nagrywaniu obrazu metodą DD. Rozruch zależy od zawartości obrazu i sprzętu docelowego. Tworzenie instalatora ze zwykłego ISO Windows wymaga innych operacji i wykracza poza funkcje tego wydania. Urządzenia wymagające UAS lub 16-bajtowych poleceń adresowania SCSI nie są obsługiwane.
+Podczas zapisu aplikacja przesyła ISO na exFAT porcjami po 128 KiB. Dostawca dokumentów Androida decyduje o własnym buforowaniu (dotyczy to m.in. chmur). Gdy dostawca nie zna rozmiaru, aplikacja liczy bajty przed wyświetleniem potwierdzenia zapisu.
 
-## Aktualizacje
+## Tryby i opcje
 
-Aplikacja sprawdza najnowsze stabilne wydanie przy otwarciu oraz po naciśnięciu „Sprawdź aktualizacje”. Korzysta z publicznego API GitHuba dla tego repozytorium i porównuje numery wersji z tagów w formacie v1.2.3. Przycisk nowej wersji otwiera stronę wydania. Instalację APK zatwierdza użytkownik w Androidzie.
+| Tryb | Funkcje |
+| --- | --- |
+| Windows/Linux ISO przez Ventoy 1.1.18 | GPT lub MBR, partycja danych exFAT z etykietą i klastrem 32, 128 lub 256 KiB, partycja rozruchowa VTOYEFI |
+| DD | Zapis IMG, RAW, BIN, DD i hybrydowych ISO. Dla hybrydowego ISO metodę można zmienić w opcjach |
+| FreeDOS 1.4 | Rozruch BIOS, MBR, FAT32, FreeCOM i jądro FreeDOS z zasobów Rufusa |
+| Pusty FAT32 | Szybkie formatowanie MBR/FAT32 z własną etykietą |
+| Kontrola | SHA-256 źródła, opcjonalna weryfikacja zapisu, opcjonalny pełny test bloków (jedno zerowanie i sprawdzenie odczytu), anulowanie operacji |
+| Aktualizacje | Automatyczne i ręczne sprawdzanie stabilnych wydań z tego repozytorium |
+
+Po przerwaniu zapisu ponów operację. Test bloków zajmuje czas proporcjonalny do całej pojemności nośnika. Tryby ISO, FAT32 i FreeDOS wymagają sektorów logicznych 512 B. Tryb DD obsługuje sektory od 512 B do 16 KiB i adresowanie SCSI READ/WRITE(10).
+
+Obsługa Windows ISO opiera się na uruchamianiu ISO przez Ventoy. Windows To Go, instalacja przez wypakowanie ISO na NTFS/UEFI:NTFS, konfiguracja odpowiedzi instalatora Windows i tworzenie trwałych partycji dla Live Linux wykraczają poza zakres tej wersji.
 
 ## Budowanie
 
 Wymagane są JDK 17, Android SDK Platform 36 i Build Tools 35.0.0. Wskaż SDK przez ANDROID_HOME lub local.properties.
 
 ```sh
-./gradlew testDebugUnitTest assembleRelease
+./gradlew testDebugUnitTest lintRelease assembleRelease
 ```
 
-Wynik kompilacji znajduje się w app/build/outputs/apk/release/. Do dystrybucji podpisz APK za pomocą apksigner. Aktualizacje wymagają tego samego identyfikatora aplikacji, tego samego certyfikatu i rosnącego versionCode.
+APK powstaje w app/build/outputs/apk/release/. Do dystrybucji użyj apksigner. Aktualizacja wymaga tego samego identyfikatora aplikacji, certyfikatu i rosnącego versionCode.
 
-## Pochodzenie i licencja
+## Pochodzenie
 
-Niezależna aplikacja na Androida inspirowana projektem [Rufus](https://github.com/pbatard/rufus). Tabela rozpoznawania partycji MBR w app/src/main/res/raw/mbr_types.properties jest adaptacją [src/mbr_types.h](https://github.com/pbatard/rufus/blob/8337c3e7e534b5d5b5045dd8ecb9a7ea60e9232c/src/mbr_types.h), © 2020 Pete Batard i © 2006 Free Software Foundation, Inc. Interfejs Material 3 Expressive i obsługę zapisu przez Android USB Host zaimplementowano dla tego projektu. Kod aplikacji udostępniono na [GNU GPL w wersji 3 lub późniejszej](LICENSE).
+Kod aplikacji udostępniono na [GPL w wersji 3 lub późniejszej](LICENSE). Niezależny projekt wykorzystuje zasoby [Rufusa](https://github.com/pbatard/rufus/tree/8337c3e7e534b5d5b5045dd8ecb9a7ea60e9232c), w tym tabelę MBR (© 2020 Pete Batard, © 2006 Free Software Foundation, Inc.), kod rozruchowy FAT32/FreeDOS i MBR Syslinux oraz KERNEL.SYS i COMMAND.COM z FreeDOS. Pochodzenie składników FreeDOS opisuje [plik projektu Rufus](app/src/main/assets/freedos/readme.txt).
+
+Obrazy rozruchowe Ventoy pochodzą z [oficjalnego wydania 1.1.18](https://github.com/ventoy/Ventoy/releases/tag/v1.1.18). Archiwum Linux sprawdzono za pomocą opublikowanego SHA-256. Zawartość boot/boot.img, boot/core.img.xz i ventoy/ventoy.disk.img.xz jest dostarczana w APK jako boot.bin, core.gz i efi.gz. Tabelę Unicode up-case odczytano z woluminu utworzonego przez mkexfatfs dołączony do tego wydania. [Kod źródłowy i licencje składników Ventoy](https://github.com/ventoy/Ventoy/tree/v1.1.18).

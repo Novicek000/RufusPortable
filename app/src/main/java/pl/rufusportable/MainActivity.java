@@ -35,7 +35,11 @@ public class MainActivity extends AppCompatActivity {
     private TextView imageName, imageMeta, deviceName, deviceMeta, status, release;
     private LinearProgressIndicator progress;
     private String installed, newTag;
-    private File tempDir;
+    private MaterialButton settings, hash, other;
+    private boolean gpt, verifyWrite=true, useIso, testMedia, dos;
+    private int clusterSectors=256;
+    private String volumeLabel="Ventoy";
+    private Uri pickedUri;
     private Future<?> preparation;
 
     private final BroadcastReceiver receiver = new BroadcastReceiver() {
@@ -60,8 +64,6 @@ public class MainActivity extends AppCompatActivity {
         usb = (UsbManager)getSystemService(USB_SERVICE);
         try { installed = getPackageManager().getPackageInfo(getPackageName(), 0).versionName; }
         catch (Exception e) { throw new IllegalStateException(e); }
-        tempDir = new File(getCacheDir(), "images-" + UUID.randomUUID());
-        tempDir.mkdirs();
         File[] stale = getCacheDir().listFiles(f -> f.getName().startsWith("images-") && f.isDirectory()
                 && System.currentTimeMillis() - f.lastModified() > 86400000L);
         if (stale != null) for (File dir : stale) clear(dir);
@@ -69,7 +71,22 @@ public class MainActivity extends AppCompatActivity {
         IntentFilter f = new IntentFilter(PERMISSION);
         f.addAction(UsbManager.ACTION_USB_DEVICE_DETACHED);
         androidx.core.content.ContextCompat.registerReceiver(this, receiver, f, androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED);
+        if (state!=null) {
+            gpt=state.getBoolean("gpt"); verifyWrite=state.getBoolean("verify",true);
+            clusterSectors=state.getInt("cluster",256); volumeLabel=state.getString("label","Ventoy");
+            String saved=state.getString("source");
+            testMedia=state.getBoolean("testMedia");
+            if (saved!=null) select(Uri.parse(saved),state.getBoolean("iso"));
+            else if (state.getBoolean("builtin")) builtin(state.getBoolean("dos"));
+        }
         checkUpdates();
+    }
+    @Override protected void onSaveInstanceState(Bundle state) {
+        super.onSaveInstanceState(state);
+        if (pickedUri!=null) state.putString("source",pickedUri.toString());
+        state.putBoolean("builtin",image!=null && image.uri==null); state.putBoolean("dos",dos); state.putBoolean("testMedia",testMedia);
+        state.putBoolean("iso",useIso); state.putBoolean("gpt",gpt); state.putBoolean("verify",verifyWrite);
+        state.putInt("cluster",clusterSectors); state.putString("label",volumeLabel);
     }
 
     private int dp(float value) { return Math.round(getResources().getDisplayMetrics().density * value); }
@@ -125,13 +142,20 @@ public class MainActivity extends AppCompatActivity {
         LinearLayout source = card(R.color.panel,24);
         label(source,"Obraz źródłowy",15,true);
         imageName = label(source,"Wybierz obraz dysku",22,true);
-        imageMeta = label(source,"IMG, RAW lub hybrydowy ISO",15,false);
+        imageMeta = label(source,"Windows / Linux ISO, IMG, RAW, BIN lub DD",15,false);
         choose = button(source,"Wybierz plik",this::pickFile,false);
+        other=button(source,"Inne opcje rozruchu",()->new MaterialAlertDialogBuilder(this).setTitle("Opcje rozruchu")
+                .setItems(new String[]{"FreeDOS 1.4 · BIOS","Formatuj jako FAT32","Pobierz Windows 11 od Microsoftu"},(d,i)->{
+                    if (i<2) builtin(i==0);
+                    else startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse("https://www.microsoft.com/pl-pl/software-download/windows11")));
+                }).setNegativeButton("Anuluj",null).show(),false);
         LinearLayout destination = card(R.color.panel,24);
         label(destination,"Nośnik docelowy",15,true);
         deviceName = label(destination,"Podłącz pendrive",22,true);
         deviceMeta = label(destination,"Użyj przejściówki lub przewodu OTG.",15,false);
         connect = button(destination,"Wybierz urządzenie USB",this::pickDisk,false);
+        settings = button(destination,"Opcje zapisu",this::options,false);
+        hash = button(source,"Oblicz sumę SHA-256",this::hashImage,false);
         LinearLayout job = card(R.color.blue,24);
         status = label(job,"Wybierz obraz i nośnik, aby rozpocząć.",16,true);
         status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
@@ -148,6 +172,9 @@ public class MainActivity extends AppCompatActivity {
         }
     }
     private void refresh() {
+        settings.setEnabled(!busy && image!=null);
+        other.setEnabled(!busy);
+        hash.setVisibility(image==null || image.uri==null?View.GONE:View.VISIBLE); hash.setEnabled(!busy);
         choose.setEnabled(!busy); connect.setEnabled(!busy);
         write.setEnabled(flashing ? !cancel : !busy && image != null && target != null);
         write.setText(flashing ? "Przerwij operację" : "Zapisz obraz");
@@ -173,18 +200,94 @@ public class MainActivity extends AppCompatActivity {
     @Override protected void onActivityResult(int request,int result,Intent data) {
         super.onActivityResult(request,result,data);
         if (request!=1 || result!=RESULT_OK || data==null || data.getData()==null) return;
-        Uri uri=data.getData();
-        if (image != null) image.file.delete();
-        image=null; imageName.setText("Przygotowywanie obrazu…"); imageMeta.setText("");
-        status.setText("Kopiowanie pliku do pamięci tymczasowej telefonu…"); setBusy(true);
+        select(data.getData(),null);
+    }
+    private void select(Uri uri,Boolean restoreMode) {
+        pickedUri=uri;
+        image=null; imageName.setText(uri.getLastPathSegment()); imageMeta.setText("Odczytywanie nagłówka…");
+        status.setText("Sprawdzanie obrazu…"); setBusy(true);
         preparation=diskWork.submit(()->{
             try {
-                ImageFile selected=ImageFile.prepare(this,uri,tempDir);
+                ImageFile selected=ImageFile.describe(this,uri);
+                ui(()->imageName.setText(selected.name));
+                selected.inspect(this);
                 ui(()->{
-                    image=selected; imageName.setText(image.name); imageMeta.setText(size(image.file.length())+" · "+image.partition);
+                    image=selected;
+                    useIso=selected.iso && (!selected.hybrid || Boolean.TRUE.equals(restoreMode));
+                    showImage();
                     status.setText(target==null ? "Teraz wybierz nośnik USB." : "Obraz jest gotowy do zapisu."); setBusy(false);
                 });
-            } catch (Exception e) { ui(()->imageName.setText("Wybierz obraz dysku")); error(e); }
+            } catch (Exception e) { ui(()->imageMeta.setText("Nie można przygotować tego obrazu.")); error(e); }
+        });
+    }
+    private void builtin(boolean boot) {
+        pickedUri=null; dos=boot; useIso=false; image=ImageFile.volume(boot);
+        showImage(); status.setText(target==null?"Wybierz nośnik USB.":"Sprawdź opcje i rozpocznij zapis."); refresh();
+    }
+    private void showImage() {
+        imageName.setText(image.name);
+        if (image.uri==null) { imageMeta.setText("MBR · FAT32 · "+(dos?"BIOS":"formatowanie")); return; }
+        imageMeta.setText((image.length<0?"Rozmiar nieznany":size(image.length))+" · "+(useIso?"ISO przez Ventoy · "+(gpt?"GPT":"MBR")+" · exFAT":image.partition+" · DD"));
+    }
+    private Spinner choices(LinearLayout box,String title,String[] items,int selected) {
+        TextView text=label(box,title,16,true);
+        Spinner spinner=new Spinner(this); spinner.setId(View.generateViewId()); text.setLabelFor(spinner.getId());
+        ArrayAdapter<String> values=new ArrayAdapter<>(this,android.R.layout.simple_spinner_item,items);
+        values.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item); spinner.setAdapter(values);
+        spinner.setSelection(selected); spinner.setMinimumHeight(dp(48)); box.addView(spinner);
+        return spinner;
+    }
+    private void options() {
+        LinearLayout box=column(); pad(box,20,8);
+        boolean switchable=image.iso && image.hybrid;
+        Spinner mode=choices(box,"Metoda zapisu",switchable?new String[]{"Sektorowa (DD)","ISO przez Ventoy"}:
+                new String[]{image.uri==null?image.name:useIso?"ISO przez Ventoy":"Sektorowa (DD)"},switchable && useIso?1:0);
+        LinearLayout isoBox=column(); box.addView(isoBox);
+        Spinner scheme=choices(isoBox,"Schemat partycji",new String[]{"MBR","GPT"},gpt?1:0);
+        Spinner clusters=choices(isoBox,"Klaster exFAT",new String[]{"32 KiB","128 KiB","256 KiB"},clusterSectors==64?0:clusterSectors==256?1:2);
+        LinearLayout volumeBox=column(); box.addView(volumeBox);
+        volumeBox.setVisibility(useIso || image.uri==null?View.VISIBLE:View.GONE);
+        TextView caption=label(volumeBox,"Etykieta woluminu",16,true);
+        EditText volume=new EditText(this); volume.setId(View.generateViewId()); caption.setLabelFor(volume.getId());
+        volume.setSingleLine(); volume.setText(volumeLabel); volumeBox.addView(volume);
+        isoBox.setVisibility(useIso?View.VISIBLE:View.GONE);
+        mode.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            public void onNothingSelected(AdapterView<?> parent) {}
+            public void onItemSelected(AdapterView<?> parent,View v,int i,long id) {
+                boolean active=switchable?i==1:useIso;
+                isoBox.setVisibility(active?View.VISIBLE:View.GONE); volumeBox.setVisibility(active || image.uri==null?View.VISIBLE:View.GONE);
+            }
+        });
+        CheckBox verify=new CheckBox(this); verify.setText("Sprawdź zapis przez SHA-256"); verify.setChecked(verifyWrite); box.addView(verify);
+        CheckBox surface=new CheckBox(this); surface.setText("Test bloków przed zapisem (pełny zapis i odczyt nośnika)");
+        surface.setChecked(testMedia); box.addView(surface);
+        ScrollView scroll=new ScrollView(this); scroll.addView(box);
+        var dialog=new MaterialAlertDialogBuilder(this).setTitle("Opcje zapisu").setView(scroll)
+                .setNegativeButton("Anuluj",null).setPositiveButton("Zastosuj",null).show();
+        dialog.getButton(-1).setOnClickListener(v->{
+            boolean iso=switchable?mode.getSelectedItemPosition()==1:useIso;
+            String label=volume.getText().toString().trim();
+            if (iso && !ExFat.validLabel(label)) { volume.setError("Wpisz od 1 do 11 znaków dozwolonych w etykiecie exFAT."); return; }
+            if (image.uri==null && !label.matches("[a-zA-Z0-9 _-]{1,11}")) {volume.setError("Wpisz do 11 liter ASCII, cyfr, spacji, - lub _."); return;}
+            useIso=iso; if (iso || image.uri==null) volumeLabel=label; testMedia=surface.isChecked();
+            gpt=scheme.getSelectedItemPosition()==1; clusterSectors=new int[]{64,256,512}[clusters.getSelectedItemPosition()];
+            verifyWrite=verify.isChecked(); showImage(); dialog.dismiss();
+        });
+    }
+    private void hashImage() {
+        ImageFile selected=image; setBusy(true); status.setText("Obliczanie SHA-256…");
+        preparation=diskWork.submit(()->{
+            try (InputStream in=selected.open(this)) {
+                java.security.MessageDigest digest=java.security.MessageDigest.getInstance("SHA-256");
+                byte[] data=new byte[131072]; int n;
+                while ((n=in.read(data))!=-1) {
+                    if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException();
+                    digest.update(data,0,n);
+                }
+                StringBuilder value=new StringBuilder();
+                for (byte v:digest.digest()) value.append(String.format(Locale.ROOT,"%02x",v&255));
+                ui(()->{setBusy(false); status.setText("SHA-256 · "+selected.name+"\n"+value);status.setTextIsSelectable(true);});
+            } catch (Exception e) { error(e); }
         });
     }
     private boolean connected(UsbDevice device) {
@@ -240,25 +343,67 @@ public class MainActivity extends AppCompatActivity {
                     .setPositiveButton("Przerwij",(d,w)->{cancel=true; refresh();}).show(); return;
         }
         if (image==null || target==null) return;
-        if (image.file.length()>capacity) { status.setText("Obraz jest większy od nośnika. Wybierz większy pendrive."); return; }
+        if (image.length<0) {
+            ImageFile selected=image; setBusy(true);
+            status.setText("Dostawca nie podał rozmiaru. Liczenie bajtów przed potwierdzeniem zapisu…");
+            preparation=diskWork.submit(()->{
+                try {
+                    long size=selected.measure(this);
+                    if (size<512) throw new IOException("Plik jest za mały na obraz dysku.");
+                    ui(()->{selected.length=size; showImage(); setBusy(false); if (target!=null) writeAction();});
+                } catch (Exception e) { error(e); }
+            });
+            return;
+        }
+        if (image.length>capacity) { status.setText("Obraz jest większy od nośnika. Wybierz większy pendrive."); return; }
         UsbDevice selected=target;
+        String method=image.uri==null?"MBR · FAT32 · "+volumeLabel:
+                useIso?(gpt?"GPT":"MBR")+" · exFAT · "+volumeLabel:"Zapis sektorowy DD";
+        String confirmation="\n\n"+method+(testMedia?"\nPełny test zapisu i odczytu całego nośnika.":"")
+                +"\nZapis zastąpi dane na tym nośniku."
+                +(image.uri!=null?" Plik źródłowy musi znajdować się poza wybranym pendrivem.":"")
+                +" Pozostaw aplikację otwartą do zakończenia operacji.";
         new MaterialAlertDialogBuilder(this).setTitle("Usunąć dane i zapisać obraz?")
-                .setMessage(image.name+" ("+size(image.file.length())+")\n↓\n"+name(selected)+" · USB "+selected.getDeviceId()+" ("+size(capacity)+")\n\nZapis zastąpi dane na tym nośniku. Pozostaw aplikację otwartą do zakończenia weryfikacji.")
+                .setMessage(image.name+(image.uri==null?"":" ("+size(image.length)+")")+"\n↓\n"+name(selected)+" · USB "+selected.getDeviceId()+" ("+size(capacity)+")"+confirmation)
                 .setNegativeButton("Anuluj",null).setPositiveButton("Usuń dane i zapisz",(d,w)->startWrite(selected)).show();
     }
     private void startWrite(UsbDevice selected) {
         if (busy || target!=selected || !connected(selected)) {status.setText("Wybierz ponownie podłączony nośnik."); return;}
         flashing=true; cancel=false; setBusy(true); progress.setVisibility(View.VISIBLE); progress.setProgress(0);
         status.setText("Rozpoczynanie zapisu…");
-        File input=image.file;
+        ImageFile input=image;
         long expectedCapacity=capacity;
         diskWork.execute(()->{
-            try (UsbDisk disk=new UsbDisk(usb,selected)) {
+            try (InputStream accessible=input.uri==null?null:input.open(this);
+                 UsbDisk disk=new UsbDisk(usb,selected)) {
+                if (accessible!=null) {
+                    if (accessible.read()==-1) throw new IOException("Źródło nie zawiera danych.");
+                    ImageFile current=ImageFile.describe(this,input.uri);
+                    if (current.length>=0 && current.length!=input.length)
+                        throw new IOException("Zmieniono plik źródłowy. Wybierz go ponownie.");
+                }
                 if (disk.capacity!=expectedCapacity) throw new IOException("Zmieniła się pojemność urządzenia. Wybierz nośnik ponownie.");
+                DiskLayout.Source source=()->input.open(this);
+                DiskLayout layout;
+                if (input.uri==null) layout=Fat32.create(n->getAssets().open("freedos/"+n),disk.capacity,disk.blockSize,dos,volumeLabel);
+                else if (useIso) layout=VentoyLayout.create(n->getAssets().open("ventoy/"+n),disk.capacity,disk.blockSize,
+                        gpt,volumeLabel,clusterSectors,input.name,input.length,source);
+                else {layout=new DiskLayout(); layout.add(0,input.length,source);}
+                layout.validate(disk.capacity,disk.blockSize);
+                if (testMedia) {
+                    DiskLayout test=new DiskLayout();
+                    test.add(0,disk.capacity,()->new ExFat.Padded(new byte[0],disk.capacity));
+                    disk.flash(test,(reading,bytes)->{
+                        if (cancel || Thread.currentThread().isInterrupted()) throw new InterruptedIOException("Przerwano test bloków.");
+                        int percent=(int)(100.0*bytes/disk.capacity);
+                        if (bytes%Math.max(131072,(disk.capacity/200/131072)*131072)==0)
+                            ui(()->{status.setText((reading?"Odczyt testowy":"Zerowanie testowe")+" · "+percent+"%");progress.setProgressCompat(percent,false);});
+                    },true);
+                }
                 final int[] last={-1};
-                disk.flash(input,(verify,bytes)->{
+                disk.flash(layout,(verify,bytes)->{
                     if (cancel || Thread.currentThread().isInterrupted()) throw new InterruptedIOException("Przerwano operację. Zapisz obraz ponownie przed użyciem nośnika.");
-                    int percent=(int)(100.0*bytes/input.length());
+                    int percent=(int)(100.0*bytes/layout.bytes);
                     int step=(verify?100:0)+percent;
                     if (step!=last[0]) {
                         last[0]=step; ui(()->{
@@ -266,10 +411,10 @@ public class MainActivity extends AppCompatActivity {
                             progress.setProgressCompat(percent,percent>0);
                         });
                     }
-                });
+                },verifyWrite);
                 ui(()->{
                     progress.setProgressCompat(100,true); flashing=false; setBusy(false);
-                    status.setText("Gotowe. Zapis zweryfikowany przez SHA-256. Możesz odłączyć nośnik.");
+                    status.setText((verifyWrite?"Zapis zweryfikowany przez SHA-256. ":"Zapis zakończony. ")+(useIso?"Uruchom komputer z USB i wybierz ISO w menu Ventoy.":"Możesz odłączyć nośnik."));
                 });
             } catch (Exception e) { error(e); }
         });
@@ -305,7 +450,7 @@ public class MainActivity extends AppCompatActivity {
         cancel=true;
         if (preparation!=null) preparation.cancel(true);
         unregisterReceiver(receiver); network.shutdownNow();
-        diskWork.execute(()->clear(tempDir)); diskWork.shutdown();
+        diskWork.shutdown();
         super.onDestroy();
     }
 }
