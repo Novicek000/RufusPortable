@@ -62,7 +62,7 @@ final class UsbDisk implements Closeable {
         ScsiError() { super("Nośnik odrzucił polecenie. Sprawdź ochronę zapisu i połączenie."); }
     }
 
-    private void command(byte[] cdb, byte[] data, int count, boolean reading) throws IOException {
+    private synchronized void command(byte[] cdb, byte[] data, int count, boolean reading) throws IOException {
         ByteBuffer wrapper = ByteBuffer.allocate(31).order(ByteOrder.LITTLE_ENDIAN);
         wrapper.putInt(0x43425355).putInt(++tag).putInt(count).put((byte)(reading ? 128 : 0))
                 .put((byte)0).put((byte)cdb.length).put(cdb);
@@ -123,7 +123,58 @@ final class UsbDisk implements Closeable {
             throw new IOException("Weryfikacja SHA-256 wykryła różnicę.");
     }
 
-    public void close() {
+    BlockDevice partition(long start,long length) throws IOException {
+        if (start<0 || length<=0 || start>capacity || length>capacity-start
+                || start%blockSize!=0 || length%blockSize!=0)
+            throw new IOException("Nieprawidłowy zakres partycji.");
+        return new BlockDevice() {
+            public long size() { return length; }
+            public int sectorSize() { return blockSize; }
+            private void check(long offset,int count) throws IOException {
+                if (offset<0 || offset>length || count>length-offset)
+                    throw new IOException("Operacja wykracza poza partycję.");
+            }
+            public void read(long offset,byte[] data) throws IOException {
+                check(offset,data.length); access(start+offset,data,false);
+            }
+            public void write(long offset,byte[] data) throws IOException {
+                check(offset,data.length); access(start+offset,data,true);
+            }
+            public void sync() throws IOException {
+                synchronized (UsbDisk.this) {
+                    command(new byte[]{0x35,0,0,0,0,0,0,0,0,0},new byte[0],0,false);
+                }
+            }
+        };
+    }
+
+    private synchronized void access(long offset,byte[] bytes,boolean writing) throws IOException {
+        int done=0;
+        while (done<bytes.length) {
+            if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException();
+            long aligned=offset/blockSize*blockSize;
+            int prefix=(int)(offset-aligned);
+            int count=Math.min(131072-prefix,bytes.length-done);
+            int blocks=(prefix+count+blockSize-1)/blockSize;
+            byte[] transfer=new byte[blocks*blockSize];
+            if (!writing || prefix!=0 || count!=transfer.length) {
+                ByteBuffer cdb=ByteBuffer.allocate(10);
+                cdb.put((byte)0x28).put((byte)0).putInt((int)(aligned/blockSize))
+                        .put((byte)0).putShort((short)blocks);
+                command(cdb.array(),transfer,transfer.length,true);
+            }
+            if (writing) {
+                System.arraycopy(bytes,done,transfer,prefix,count);
+                ByteBuffer cdb=ByteBuffer.allocate(10);
+                cdb.put((byte)0x2a).put((byte)0).putInt((int)(aligned/blockSize))
+                        .put((byte)0).putShort((short)blocks);
+                command(cdb.array(),transfer,transfer.length,false);
+            } else System.arraycopy(transfer,prefix,bytes,done,count);
+            done+=count; offset+=count;
+        }
+    }
+
+    public synchronized void close() {
         if (iface != null) connection.releaseInterface(iface);
         connection.close();
     }

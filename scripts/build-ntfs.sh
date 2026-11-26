@@ -28,5 +28,14 @@ for abi in "${@:-arm64-v8a}"; do
             "$source_dir/configure" --host="$target" --disable-ntfs-3g --disable-ntfsprogs \
             --disable-crypto --disable-device-default-io-ops --enable-static --disable-shared
         make -j"${BUILD_JOBS:-2}" -C libntfs-3g
+        output_dir="$native_root/jniLibs/$abi"
+        mkdir -p "$output_dir"
+        "$toolchain/$compiler" -shared -fPIC -O2 -Wall -Wextra -Werror \
+            -I "$build_dir" -I "$source_dir/include/ntfs-3g" \
+            "$project_dir/app/src/main/cpp/ntfs_bridge.c" \
+            "$project_dir/app/src/main/cpp/ntfs_jni.c" \
+            "$build_dir/libntfs-3g/.libs/libntfs-3g.a" \
+            -Wl,-z,max-page-size=16384 -Wl,--no-undefined \
+            -o "$output_dir/librufus_ntfs.so"
     )
 done

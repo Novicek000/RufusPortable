@@ -12,7 +12,7 @@ Celem jest zgodność funkcjonalna z Rufusem z rewizji 8337c3e7e534b5d5b5045dd8e
 | Zapis DD i SHA-256 zapisanych zakresów | Istnieje |
 | ISO 9660 i Joliet | Czytnik drzewa i ekstentów, test rzeczywistego Alpine ISO |
 | UDF | Czytnik partycji fizycznych, alokacji krótkiej/długiej/osadzonej i fragmentów, test rzeczywistego Windows 11 ISO |
-| NTFS | Biblioteka pbatard/ntfs-3g skompilowana dla Androida ARM64, ARMv7, x86 i x86_64, integracja USB i formatowania w toku |
+| NTFS | Biblioteka pbatard/ntfs-3g i JNI dla czterech ABI w APK; tworzenie katalogów i zapis plików przez adapter dyskowy sprawdzone, formatowanie i integracja instalatora w toku |
 | UEFI:NTFS | Zasób źródłowego Rufusa dostępny, integracja oczekuje na zapis systemu plików |
 | FAT16/FAT32/exFAT | Istnieją podstawowe generatory FAT32/exFAT, potrzebna pełna obsługa drzewa plików i zgodność opcji |
 | UDF, ReFS, ext2/ext3/ext4 jako system docelowy | Do implementacji |
@@ -43,6 +43,14 @@ Nowy release zgodności z Rufusem wymaga działających powyższych funkcji, prz
 
 ## Budowanie części natywnej
 
-Biblioteka NTFS jest przypięta jako podmoduł do d9dca657972d90a64801624a03376044316290b7. Inicjalizuj ją przez git submodule update --init. Skrypt scripts/build-ntfs.sh wymaga Android NDK r27c wskazanego w ANDROID_NDK_HOME oraz hostowych narzędzi autoconf, automake, libtool, m4, make i makr pkg-config/libgcrypt. Domyślnie buduje arm64-v8a. Pozostałe ABI można podać jako argumenty. Wynik powstaje w app/build/native, a połączenie z APK wymaga jeszcze warstwy JNI i operacji urządzenia.
+Biblioteka NTFS jest przypięta jako podmoduł do d9dca657972d90a64801624a03376044316290b7. Inicjalizuj ją przez git submodule update --init. Skrypt scripts/build-ntfs.sh wymaga Android NDK r27c wskazanego w ANDROID_NDK_HOME oraz hostowych narzędzi autoconf, automake, libtool, m4, make i makr pkg-config/libgcrypt. Domyślnie buduje arm64-v8a. Pozostałe ABI można podać jako argumenty. Wynik powstaje w app/build/native, warstwa JNI i operacje urządzenia są dołączane do APK przez zadanie buildNativeNtfs.
 
 UDF sprawdzono na oficjalnym Windows 11 Enterprise Evaluation o wielkości 8 225 329 152 bajtów. Skan zwrócił 1072 wpisy, w tym sources/install.wim o rozmiarze 7 333 902 541 bajtów w 7 ekstentach. Pobrano jedynie metadane do testu odczytu, bez wypakowania całego obrazu.
+
+## Weryfikacja adaptera NTFS
+
+Adapter natywny udostępnia montowanie przygotowanego woluminu, tworzenie katalogów UTF-16, tworzenie i zapis plików oraz zamykanie i synchronizację. JNI przekazuje operacje do interfejsu BlockDevice. UsbDisk udostępnia taki interfejs dla wybranego zakresu partycji, z odczytem i zachowaniem sąsiednich danych przy zapisie niepełnego sektora.
+
+Skrypt scripts/test-native-ntfs.sh wykonuje testy C i Java/JNI na rzeczywistych woluminach NTFS w plikach. Wymaga hostowego GCC, JDK, mkntfs i ntfscat (pakiet ntfs-3g), Python 3 i narzędzi autotools. Niezależny odczyt ntfscat sprawdza zapisane treści. JVM działa z -Xcheck:jni. Zweryfikowano obsługę wyjątków z callbacków, ochronę uchwytów przy odmontowaniu, zamknięcie pozostawionych plików i ponowne montowanie po błędzie odczytu. Biblioteki Androida są linkowane z --no-undefined oraz obsługą wyrównania stron 16 KiB.
+
+Testy te dotyczą adaptera i jego połączenia z Javą. Interfejs zapisu instalatora nadal wymaga formatowania natywnego, przygotowania partycji i połączenia całej operacji wypakowywania z UEFI:NTFS.

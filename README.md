@@ -30,7 +30,9 @@ Obsługa Windows ISO opiera się na uruchamianiu ISO przez Ventoy. Windows To Go
 
 ## Budowanie
 
-Wymagane są JDK 17, Android SDK Platform 36 i Build Tools 35.0.0. Wskaż SDK przez ANDROID_HOME lub local.properties.
+Wymagane są JDK 17, Android SDK Platform 36, Build Tools 35.0.0 oraz Android NDK r27c (27.2.12479018). Część natywna jest budowana na hoście Linux x86_64. Wskaż SDK przez ANDROID_HOME lub local.properties, a NDK przez ANDROID_NDK_HOME. Narzędzia hosta obejmują autoconf, automake, libtool, m4, make oraz makra pkg-config i libgcrypt (pakiety Debian autoconf automake libtool autotools-dev pkg-config libgcrypt20-dev).
+
+Przed kompilacją wykonaj git submodule update --init. Gradle buduje bibliotekę NTFS i JNI dla czterech ABI, a następnie dołącza je do APK. [Stan integracji natywnego portu](PORT_STATUS.md) opisuje funkcje oczekujące na implementację.
 
 ```sh
 ./gradlew testDebugUnitTest lintRelease assembleRelease

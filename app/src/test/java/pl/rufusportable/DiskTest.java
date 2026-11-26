@@ -95,6 +95,25 @@ public class DiskTest {
         },true));
         assertEquals(1,writes);
     }
+    @Test public void randomPartitionWritePreservesBytesOutsideUnalignedRange() throws Exception {
+        Arrays.fill(storage,(byte)87);
+        BlockDevice partition=disk.partition(512,400*512);
+        byte[] source=new byte[180007];new Random(71).nextBytes(source);
+        partition.write(513,source);
+        byte[] actual=new byte[source.length];partition.read(513,actual);
+        assertArrayEquals(source,actual);
+        for (int i=0;i<1025;i++) assertEquals(87,storage[i]);
+        for (int i=1025+source.length;i<storage.length;i++) assertEquals(87,storage[i]);
+        partition.sync();
+    }
+    @Test public void randomPartitionIoRejectsInvalidRangesBeforeWriting() throws Exception {
+        BlockDevice partition=disk.partition(512,512);
+        assertThrows(IOException.class,()->partition.write(511,new byte[2]));
+        assertThrows(IOException.class,()->partition.write(-1,new byte[2]));
+        assertThrows(IOException.class,()->partition.read(Long.MAX_VALUE,new byte[2]));
+        assertThrows(IOException.class,()->disk.partition(Long.MAX_VALUE,512));
+        assertEquals(0,writes);
+    }
     @Test public void comparesReleaseComponentsNumerically() {
         assertTrue(Updates.newer("v1.10.0","1.9.9"));
         assertFalse(Updates.newer("1.0.0","1.0.0"));
