@@ -35,6 +35,23 @@ final class ImageFile {
         if (stream==null) throw new IOException("Nie można otworzyć wybranego obrazu.");
         return stream;
     }
+    List<IsoTree.Entry> contents(Context ctx) throws IOException {
+        try (ParcelFileDescriptor descriptor=ctx.getContentResolver().openFileDescriptor(uri,"r")) {
+            if (descriptor==null) throw new IOException("Nie można otworzyć obrazu.");
+            try (FileInputStream stream=new FileInputStream(descriptor.getFileDescriptor())) {
+                java.nio.channels.FileChannel channel=stream.getChannel();
+                long available=length>=0?length:channel.size();
+                return IsoTree.scan((offset,data)->{
+                    java.nio.ByteBuffer buffer=java.nio.ByteBuffer.wrap(data);
+                    while (buffer.hasRemaining()) {
+                        int count=channel.read(buffer,offset+buffer.position());
+                        if (count<0) throw new EOFException("Niepełny obraz ISO.");
+                        if (count==0) throw new IOException("Źródło nie udostępnia odczytu pozycyjnego.");
+                    }
+                },available);
+            }
+        }
+    }
     long measure(Context ctx) throws IOException {
         long count=0;
         try (InputStream in=open(ctx)) {
