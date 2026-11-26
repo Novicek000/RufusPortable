@@ -14,7 +14,7 @@ if [[ ! -f "$source_dir/configure" ]]; then
 fi
 (
     cd "$build_dir"
-    CC="${HOST_CC:-gcc}" CFLAGS="-O2 -fPIC" "$source_dir/configure" \
+    CC="${HOST_CC:-gcc}" CFLAGS="-std=gnu11 -O2 -fPIC" "$source_dir/configure" \
         --disable-ntfs-3g --disable-ntfsprogs --disable-crypto \
         --disable-device-default-io-ops --enable-static --disable-shared
     make -j"${BUILD_JOBS:-2}" -C libntfs-3g
@@ -26,7 +26,7 @@ includes=(-I "$build_dir" -I "$source_dir/include/ntfs-3g" -I "$source_dir/ntfsp
     -include "$build_dir/config.h")
 format_sources=("$bridge_dir/ntfs_format.c" "$source_dir/ntfsprogs/attrdef.c"
     "$source_dir/ntfsprogs/boot.c" "$source_dir/ntfsprogs/sd.c" "$source_dir/ntfsprogs/utils.c")
-compile_options=(-fPIC -fvisibility=hidden -ffunction-sections -fdata-sections -O2
+compile_options=(-std=gnu11 -fPIC -fvisibility=hidden -ffunction-sections -fdata-sections -O2
     -Wall -Wextra -Werror -Wno-address-of-packed-member -Wno-unused-but-set-variable)
 link_options=(-Wl,--gc-sections -Wl,--no-undefined -pthread)
 "${HOST_CC:-gcc}" "${compile_options[@]}" "${includes[@]}" \

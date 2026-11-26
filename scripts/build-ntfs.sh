@@ -24,13 +24,13 @@ for abi in "${@:-arm64-v8a}"; do
     (
         cd "$build_dir"
         CC="$toolchain/$compiler" AR="$toolchain/llvm-ar" RANLIB="$toolchain/llvm-ranlib" \
-        NM="$toolchain/llvm-nm" STRIP="$toolchain/llvm-strip" CFLAGS="-O2 -fPIC" \
+        NM="$toolchain/llvm-nm" STRIP="$toolchain/llvm-strip" CFLAGS="-std=gnu11 -O2 -fPIC" \
             "$source_dir/configure" --host="$target" --disable-ntfs-3g --disable-ntfsprogs \
             --disable-crypto --disable-device-default-io-ops --enable-static --disable-shared
         make -j"${BUILD_JOBS:-2}" -C libntfs-3g
         output_dir="$native_root/jniLibs/$abi"
         mkdir -p "$output_dir"
-        "$toolchain/$compiler" -shared -fPIC -fvisibility=hidden -ffunction-sections -fdata-sections -O2 -Wall -Wextra -Werror -Wno-address-of-packed-member -Wno-unused-but-set-variable \
+        "$toolchain/$compiler" -shared -std=gnu11 -fPIC -fvisibility=hidden -ffunction-sections -fdata-sections -O2 -Wall -Wextra -Werror -Wno-address-of-packed-member -Wno-unused-but-set-variable \
             -I "$build_dir" -I "$source_dir/include/ntfs-3g" -I "$source_dir/ntfsprogs" \
             -include "$build_dir/config.h" \
             "$project_dir/app/src/main/cpp/ntfs_bridge.c" \
