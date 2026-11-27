@@ -16,7 +16,8 @@ Celem jest zgodność funkcjonalna z Rufusem z rewizji 8337c3e7e534b5d5b5045dd8e
 | UEFI:NTFS | Oryginalny obraz Rufusa w zasobach aplikacji; generator GPT/MBR odwzorowuje układ i typy partycji, wypakowywanie i łańcuch UEFI:NTFS zintegrowane, start Windows PE potwierdzony w QEMU |
 | FAT16/FAT32/exFAT | Istnieją podstawowe generatory FAT32/exFAT, potrzebna pełna obsługa drzewa plików i zgodność opcji |
 | UDF, ReFS, ext2/ext3/ext4 jako system docelowy | Do implementacji |
-| UAS, wiele LUN | Do implementacji i testów |
+| Wiele LUN | Wykrywanie GET_MAX_LUN, wybór jednostki i adresowanie CBW; testy symulowanego transportu |
+| UAS | Do implementacji i testów |
 
 ## Rozruch i instalacja
 
@@ -91,3 +92,7 @@ Na emulatorze Android 8.0 / API 26 (x86) oba testy instrumentacyjne `WimProxyTes
 ## Adresy SCSI 64-bit
 
 `UsbDisk` przechodzi z READ CAPACITY(10) do READ CAPACITY(16), gdy nośnik zwraca granicę 32-bitową. Wybiera READ/WRITE(16), gdy zakres transferu przekracza tę granicę, także jeśli jego początek jeszcze mieści się w 32 bitach. Geometria przekraczająca zakres adresów bajtowych Javy jest odrzucana przed zapisem. Testy emulowanego transportu sprawdzają wysokie adresy, zachowanie sąsiednich bajtów przy niepełnym sektorze, DD z SHA-256 przez granicę LBA oraz przepełnienie pojemności. Wszystkie 28 testów Java i lint przeszły. Nie wykonano próby na fizycznym nośniku powyżej 2 TiB; obsługa adresowania transportu nie potwierdza pełnej zgodności wszystkich generatorów systemów plików z takimi pojemnościami.
+
+## Jednostki logiczne USB
+
+Po przyznaniu dostępu aplikacja odczytuje GET_MAX_LUN. Dla wielojednostkowych czytników pokazuje wybór jednostki, a wybraną LUN podaje w metadanych nośnika i potwierdzeniu zapisu. Wszystkie CBW, w tym sprawdzenie pojemności, odczyt, zapis i synchronizacja, zawierają tę LUN. Brak obsługi GET_MAX_LUN (stall) pozostawia jednostkę 0 zgodnie z Bulk-Only. Nieprawidłowa lub niedostępna jednostka jest odrzucana przed komendami SCSI. Testy symulują czterojednostkowy czytnik, wybór LUN 2, zniknięcie jednostki, błędną odpowiedź i stall. Wszystkie 31 testów Java, lint i budowanie APK przeszły; nie wykonano testu fizycznego czytnika z wieloma LUN.

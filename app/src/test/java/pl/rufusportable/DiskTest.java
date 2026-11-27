@@ -17,6 +17,8 @@ public class DiskTest {
     private long cursor, windowStart, lastLba=storage.length/512-1;
     private UsbManager manager;
     private UsbDevice device;
+    private UsbDeviceConnection link;
+    private int maximumLun, selectedLun;
     private final List<Integer> commands=new ArrayList<>();
     private boolean corrupt;
     private UsbDisk disk;
@@ -25,7 +27,7 @@ public class DiskTest {
         manager = mock(UsbManager.class);
         device = mock(UsbDevice.class);
         UsbInterface face = mock(UsbInterface.class);
-        UsbDeviceConnection link = mock(UsbDeviceConnection.class);
+        link = mock(UsbDeviceConnection.class);
         UsbEndpoint in = mock(UsbEndpoint.class), out = mock(UsbEndpoint.class);
         when(device.getInterfaceCount()).thenReturn(1);
         when(device.getInterface(0)).thenReturn(face);
@@ -40,6 +42,8 @@ public class DiskTest {
         when(in.getDirection()).thenReturn(128);
         when(manager.openDevice(device)).thenReturn(link);
         when(link.claimInterface(face,true)).thenReturn(true);
+        when(link.controlTransfer(eq(0xa1),eq(0xfe),eq(0),eq(0),any(),eq(1),eq(5000)))
+                .thenAnswer(call->{byte[] response=call.getArgument(4);response[0]=(byte)maximumLun;return 1;});
         when(link.bulkTransfer(any(),any(),anyInt(),anyInt(),anyInt())).thenAnswer(call -> {
             UsbEndpoint endpoint = call.getArgument(0);
             byte[] payload = call.getArgument(1);
@@ -48,6 +52,7 @@ public class DiskTest {
             if (endpoint == out && remaining == 0) {
                 assertEquals(31,count);
                 assertEquals(0x43425355,b.getInt());
+                assertEquals(selectedLun,payload[13]);
                 tag=b.getInt(); remaining=b.getInt(); op=payload[15]&255; commands.add(op);
                 if (op==0x28 || op==0x2a || op==0x88 || op==0x8a) {
                     b.order(ByteOrder.BIG_ENDIAN);
@@ -158,6 +163,28 @@ public class DiskTest {
         lastLba=-1; // Unsigned READ CAPACITY(16) result outside Java address range.
         assertThrows(IOException.class,()->new UsbDisk(manager,device));
         assertEquals(0,writes);
+    }
+    @Test public void multiLunReaderSendsAllCommandsOnlyToSelectedUnit() throws Exception {
+        maximumLun=3;
+        assertEquals(4,UsbDisk.logicalUnits(manager,device));
+        selectedLun=2;
+        disk=new UsbDisk(manager,device,selectedLun);
+        disk.flash(image(513),(v,n)->{},true);
+        assertEquals(1,writes);
+    }
+    @Test public void removedOrInvalidLogicalUnitIsRejectedBeforeScsiCommands() {
+        maximumLun=3;
+        int before=commands.size();
+        assertThrows(IOException.class,()->new UsbDisk(manager,device,4));
+        assertThrows(IOException.class,()->new UsbDisk(manager,device,-1));
+        maximumLun=16;
+        assertThrows(IOException.class,()->UsbDisk.logicalUnits(manager,device));
+        assertEquals(before,commands.size());assertEquals(0,writes);
+    }
+    @Test public void stalledGetMaxLunUsesSingleUnitFallback() throws Exception {
+        when(link.controlTransfer(eq(0xa1),eq(0xfe),eq(0),eq(0),any(),eq(1),eq(5000))).thenReturn(-1);
+        assertEquals(1,UsbDisk.logicalUnits(manager,device));
+        assertThrows(IOException.class,()->new UsbDisk(manager,device,1));
     }
     @Test public void comparesReleaseComponentsNumerically() {
         assertTrue(Updates.newer("v1.10.0","1.9.9"));

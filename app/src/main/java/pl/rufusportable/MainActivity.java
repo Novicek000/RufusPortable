@@ -27,6 +27,7 @@ public class MainActivity extends AppCompatActivity {
     private UsbDevice target, pending;
     private ImageFile image;
     private long capacity;
+    private int targetLun, targetUnits=1;
     private boolean busy, checking, flashing;
     private volatile boolean cancel;
     private static final String PERMISSION = "pl.rufusportable.USB";
@@ -48,7 +49,7 @@ public class MainActivity extends AppCompatActivity {
             if (PERMISSION.equals(intent.getAction()) && pending != null) {
                 UsbDevice requested = pending;
                 pending = null;
-                if (usb.hasPermission(requested)) inspect(requested);
+                if (usb.hasPermission(requested)) inspectUnits(requested);
                 else { setBusy(false); status.setText("Android nie przyznał dostępu do nośnika."); }
             } else if (UsbManager.ACTION_USB_DEVICE_DETACHED.equals(intent.getAction())) {
                 if (target != null && !connected(target)) {
@@ -353,7 +354,7 @@ public class MainActivity extends AppCompatActivity {
     }
     private void request(UsbDevice device) {
         target=null; showTarget(); setBusy(true);
-        if (usb.hasPermission(device)) inspect(device);
+        if (usb.hasPermission(device)) inspectUnits(device);
         else {
             pending=device;
             PendingIntent result=PendingIntent.getBroadcast(this,device.getDeviceId(),
@@ -361,13 +362,31 @@ public class MainActivity extends AppCompatActivity {
             usb.requestPermission(device,result);
         }
     }
-    private void inspect(UsbDevice device) {
+    private void inspectUnits(UsbDevice device) {
+        status.setText("Wyszukiwanie jednostek nośnika…");
+        diskWork.execute(()->{
+            try {
+                int units=UsbDisk.logicalUnits(usb,device);
+                ui(()->{
+                    if (!connected(device)) {setBusy(false);status.setText("Odłączono nośnik.");return;}
+                    if (units==1) {inspect(device,0,units);return;}
+                    String[] names=new String[units];
+                    for (int i=0;i<units;i++) names[i]="Jednostka "+(i+1)+" · LUN "+i;
+                    new MaterialAlertDialogBuilder(this).setTitle("Wybierz jednostkę USB")
+                            .setItems(names,(dialog,index)->inspect(device,index,units))
+                            .setNegativeButton("Anuluj",(dialog,which)->setBusy(false))
+                            .setOnCancelListener(dialog->setBusy(false)).show();
+                });
+            } catch (Exception error) {error(error);}
+        });
+    }
+    private void inspect(UsbDevice device,int lun,int units) {
         status.setText("Odczytywanie pojemności nośnika…");
         diskWork.execute(()->{
-            try (UsbDisk disk=new UsbDisk(usb,device)) {
+            try (UsbDisk disk=new UsbDisk(usb,device,lun)) {
                 long bytes=disk.capacity;
                 ui(()->{
-                    target=connected(device)?device:null; capacity=bytes; showTarget(); setBusy(false);
+                    target=connected(device)?device:null; capacity=bytes; targetLun=lun; targetUnits=units; showTarget(); setBusy(false);
                     status.setText(target==null ? "Odłączono nośnik." : image==null ? "Teraz wybierz obraz dysku." : "Możesz rozpocząć zapis.");
                 });
             } catch (Exception e) { error(e); }
@@ -375,7 +394,7 @@ public class MainActivity extends AppCompatActivity {
     }
     private void showTarget() {
         deviceName.setText(target==null?"Podłącz pendrive":name(target));
-        deviceMeta.setText(target==null?"Użyj przejściówki lub przewodu OTG.":size(capacity)+" · USB "+target.getDeviceId());
+        deviceMeta.setText(target==null?"Użyj przejściówki lub przewodu OTG.":size(capacity)+" · USB "+target.getDeviceId()+(targetUnits>1?" · LUN "+targetLun:""));
         refresh();
     }
     private void writeAction() {
@@ -399,6 +418,7 @@ public class MainActivity extends AppCompatActivity {
         }
         if (!useIso && image.length>capacity) { status.setText("Obraz jest większy od nośnika. Wybierz większy pendrive."); return; }
         UsbDevice selected=target;
+        int selectedLun=targetLun;
         String method=image.uri==null?"MBR · FAT32 · "+volumeLabel:
                 useIso?(gpt?"GPT":"MBR")+" · NTFS · "+volumeLabel:"Zapis sektorowy DD";
         String confirmation="\n\n"+method+(testMedia?"\nPełny test zapisu i odczytu całego nośnika.":"")
@@ -406,18 +426,18 @@ public class MainActivity extends AppCompatActivity {
                 +(image.uri!=null?" Plik źródłowy musi znajdować się poza wybranym pendrivem.":"")
                 +" Pozostaw aplikację otwartą do zakończenia operacji.";
         new MaterialAlertDialogBuilder(this).setTitle("Usunąć dane i zapisać obraz?")
-                .setMessage(image.name+(image.uri==null?"":" ("+size(image.length)+")")+"\n↓\n"+name(selected)+" · USB "+selected.getDeviceId()+" ("+size(capacity)+")"+confirmation)
-                .setNegativeButton("Anuluj",null).setPositiveButton("Usuń dane i zapisz",(d,w)->startWrite(selected)).show();
+                .setMessage(image.name+(image.uri==null?"":" ("+size(image.length)+")")+"\n↓\n"+name(selected)+" · USB "+selected.getDeviceId()+(targetUnits>1?" · LUN "+selectedLun:"")+" ("+size(capacity)+")"+confirmation)
+                .setNegativeButton("Anuluj",null).setPositiveButton("Usuń dane i zapisz",(d,w)->startWrite(selected,selectedLun)).show();
     }
-    private void startWrite(UsbDevice selected) {
-        if (busy || target!=selected || !connected(selected)) {status.setText("Wybierz ponownie podłączony nośnik."); return;}
+    private void startWrite(UsbDevice selected,int selectedLun) {
+        if (busy || target!=selected || targetLun!=selectedLun || !connected(selected)) {status.setText("Wybierz ponownie podłączony nośnik."); return;}
         flashing=true; cancel=false; setBusy(true); progress.setVisibility(View.VISIBLE); progress.setProgress(0);
         status.setText("Rozpoczynanie zapisu…");
         ImageFile input=image;
         long expectedCapacity=capacity;
         diskWork.execute(()->{
             try (InputStream accessible=input.uri==null?null:input.open(this);
-                 UsbDisk disk=new UsbDisk(usb,selected)) {
+                 UsbDisk disk=new UsbDisk(usb,selected,selectedLun)) {
                 if (accessible!=null) {
                     if (accessible.read()==-1) throw new IOException("Źródło nie zawiera danych.");
                     ImageFile current=ImageFile.describe(this,input.uri);

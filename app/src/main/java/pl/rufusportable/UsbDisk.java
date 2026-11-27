@@ -6,13 +6,14 @@ import java.nio.*;
 import java.security.MessageDigest;
 import java.util.Arrays;
 
-/** USB Mass Storage Bulk-Only Transport, transparent SCSI with 64-bit block addresses, logical unit zero. */
+/** USB Mass Storage Bulk-Only Transport, transparent SCSI with 64-bit block addresses and explicit logical units. */
 final class UsbDisk implements Closeable {
     interface Progress { void moved(boolean verifying, long bytes) throws IOException; }
     private final UsbDeviceConnection connection;
     private final UsbInterface iface;
     private UsbEndpoint in, out;
     private int tag;
+    private final int lun;
     final int blockSize;
     final long capacity;
 
@@ -24,7 +25,38 @@ final class UsbDisk implements Closeable {
         return null;
     }
 
+    static int logicalUnits(UsbManager manager,UsbDevice device) throws IOException {
+        UsbInterface iface=storage(device);
+        UsbDeviceConnection connection=manager.openDevice(device);
+        if (connection==null) throw new IOException("Brak dostępu do USB.");
+        boolean claimed=false;
+        try {
+            if (iface==null || !(claimed=connection.claimInterface(iface,true)))
+                throw new IOException("Nośnik jest zajęty.");
+            return maxLun(connection,iface)+1;
+        } finally {
+            if (claimed) connection.releaseInterface(iface);
+            connection.close();
+        }
+    }
+
+    private static int maxLun(UsbDeviceConnection connection,UsbInterface iface) throws IOException {
+        byte[] response=new byte[1];
+        int result=connection.controlTransfer(0xa1,0xfe,0,iface.getId(),response,1,5000);
+        // Bulk-Only devices with a single unit may stall GET_MAX_LUN.
+        if (result<=0) return 0;
+        int maximum=response[0]&255;
+        if (result!=1 || maximum>15) throw new IOException("Nieprawidłowa liczba jednostek USB.");
+        return maximum;
+    }
+
     UsbDisk(UsbManager manager, UsbDevice device) throws IOException {
+        this(manager,device,0);
+    }
+
+    UsbDisk(UsbManager manager, UsbDevice device,int logicalUnit) throws IOException {
+        if (logicalUnit<0 || logicalUnit>15) throw new IOException("Nieprawidłowa jednostka USB.");
+        lun=logicalUnit;
         iface = storage(device);
         connection = manager.openDevice(device);
         if (connection == null) throw new IOException("Brak dostępu do USB.");
@@ -37,6 +69,8 @@ final class UsbDisk implements Closeable {
                 else out = e;
             }
             if (in == null || out == null) throw new IOException("Brak kanałów USB.");
+            if (lun>0 && lun>maxLun(connection,iface))
+                throw new IOException("Wybrana jednostka USB nie jest już dostępna.");
             byte[] geometry = new byte[8];
             byte[] readCapacity = new byte[10];
             readCapacity[0] = 0x25;
@@ -78,7 +112,7 @@ final class UsbDisk implements Closeable {
     private synchronized void command(byte[] cdb, byte[] data, int count, boolean reading) throws IOException {
         ByteBuffer wrapper = ByteBuffer.allocate(31).order(ByteOrder.LITTLE_ENDIAN);
         wrapper.putInt(0x43425355).putInt(++tag).putInt(count).put((byte)(reading ? 128 : 0))
-                .put((byte)0).put((byte)cdb.length).put(cdb);
+                .put((byte)lun).put((byte)cdb.length).put(cdb);
         if (transfer(out, wrapper.array(), 0, 31) != 31) throw new IOException("Nie udało się wysłać polecenia USB.");
         int position = 0;
         while (position < count) {
