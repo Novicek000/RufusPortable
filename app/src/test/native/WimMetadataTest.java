@@ -19,6 +19,14 @@ public final class WimMetadataTest {
             throw new AssertionError("UTF-8 metadata");
         if(!new WimMetadata.Image(3,java.util.Collections.emptyMap()).editionName().equals("Nieznana wersja Windows"))
             throw new AssertionError("missing edition fallback");
+        long compacted=WimMetadata.compact(args[0],2);
+        if(compacted!=Files.size(Path.of(args[0])))throw new AssertionError("standalone compact size");
+        if(WimMetadata.read(args[0]).size()!=2)throw new AssertionError("compact changed images");
+        WimMetadata.verify(args[0]);
+        byte[] beforeCompact=Files.readAllBytes(Path.of(args[0]));
+        try {WimMetadata.compact(args[0],3);throw new AssertionError("invalid compact image accepted");}
+        catch(IOException expected) {}
+        if(!java.util.Arrays.equals(beforeCompact,Files.readAllBytes(Path.of(args[0]))))throw new AssertionError("invalid compact changed WIM");
         Path invalid=Files.createTempFile(Path.of(args[0]).getParent(),"invalid-wim",".bin");
         try {
             Files.writeString(invalid,"invalid WIM header");

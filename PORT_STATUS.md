@@ -25,7 +25,7 @@ Celem jest zgodność funkcjonalna z Rufusem z rewizji 8337c3e7e534b5d5b5045dd8e
 | --- | --- |
 | Standardowy instalator Windows wypakowany na NTFS | Ścieżka jest podłączona w aplikacji, pliki kopiowane i weryfikowane po ponownym montowaniu; WinPE uruchomiony w QEMU, pełna instalacja do sprawdzenia |
 | Windows To Go | Do implementacji aplikowania WIM na NTFS, konfiguracji BCD oraz partycji ESP/MSR |
-| Personalizacja instalatora Windows i unattended XML | Konto, prywatność, region, BitLocker, wymagania Windows 11 i QoL podłączone do zapisu; instalacja bezobsługowa i wybór edycji podłączone; CA 2023, SkuSiPolicy i instalacja systemu do uzupełnienia |
+| Personalizacja instalatora Windows i unattended XML | Konto, prywatność, region, BitLocker, wymagania Windows 11 i QoL podłączone do zapisu; instalacja bezobsługowa i wybór edycji podłączone; CA 2023, SkuSiPolicy i tryb S podłączone; instalacja systemu do weryfikacji |
 | FreeDOS | Podstawowy start BIOS sprawdzony w QEMU |
 | MS-DOS | Do implementacji wraz z odpowiednim źródłem plików systemowych |
 | Syslinux 4/6, GRUB2, Grub4DOS, ReactOS | Do implementacji |
@@ -142,3 +142,13 @@ Profil instalatora odczytuje metadane install.wim lub install.esd przez bezpośr
 Dla Windows 11 opcja bezobsługowa pojawia się dopiero po włączeniu konta lokalnego, regionalizacji i pomijania pytań o zbieranie danych. Wyłączenie któregoś warunku odznacza ją. Przed zastosowaniem trzy oświadczenia wymagają osobnego zaznaczenia, zgodnie z SelectionDialog oryginału. Końcowe potwierdzenie USB przypomina o automatycznym wymazaniu dysku 0 komputera. Wybór edycji i ustawienia przetrwają odtworzenie Activity. XML nadal pochodzi z porównanego generatora Rufusa; test sprawdza indeks edycji i cel disk 0 / partition 3.
 
 60 testów Java, lint, kompilacja czterech ABI, testy hostowe WIM oraz 32 768 porównań XML przeszły. Sześć testów na API 26 / x86 przeszło, w tym obsługa syntetycznego ISO, rzeczywisty natywny odczyt WIM i wybór edycji ARM64 przez dostępność Androida wraz z trzema potwierdzeniami. Nie jest to jeszcze test automatycznej instalacji Windows.
+
+## Windows CA 2023 i pozostałe opcje instalatora
+
+Opcje CA 2023 i SkuSiPolicy pojawiają się od kompilacji 26200, jak w źródle Rufusa. Tryb S jest opisany jako zaawansowany, z informacją o możliwości utrzymania blokady po reinstalacji. SkuSiPolicy i tryb S korzystają z oryginalnego generatora, bez zmiany jego warunków emisji sekcji XML.
+
+Przed formatowaniem opcja CA 2023 wypakowuje wyłącznie katalogi Windows/Boot/EFI_EX i Fonts_EX z wybranego indeksu boot.wim do osobnego katalogu roboczego. Nie kopiuje całego ISO ani WIM na telefon. Plan zastępuje pierwszy pasujący plik EFI w kolejności architektur Rufusa, opcjonalny bootmgr.efi i czcionki z usuniętym przyrostkiem _EX. Zachowuje wielkość liter istniejących katalogów. Te pliki uczestniczą w zwykłym kopiowaniu i sprawdzeniu SHA-256 na NTFS. Katalog roboczy jest usuwany także przy błędzie. Sam boot.wim jest przebudowywany w miejscu na nośniku z UNSAFE_COMPACT również wtedy, gdy nie dodaje się odpowiedzi windowsPE.
+
+66 testów Java, lint, budowanie czterech ABI, natywne testy WIM i porównanie generatora przeszły. Siedem testów na API 26 / x86 przeszło. Nowy test przechodzi od własnego ISO przez AppFuse, wypakowanie zasobów EFI, plan podmiany, instalację NTFS i kompaktowanie docelowego WIM do weryfikacji po ponownym montowaniu. Używa własnych danych testowych; nie dowodzi rozruchu Microsoft Secure Boot CA 2023 na fizycznym komputerze.
+
+[CI 46045827499](https://github.com/Novicek000/RufusPortable/actions/runs/46045827499) potwierdziło wcześniejszą rewizję a21f401 na API 26 i 35, w tym wybór edycji i potwierdzenia instalacji bezobsługowej.

@@ -92,10 +92,11 @@ public class StartScreenTest {
             assertEquals(4,((android.widget.Spinner)dialogRoot.findViewById(caption.getLabelFor())).getSelectedItemPosition());
         }
     }
-    private void windowsProfile(MainActivity activity) throws Exception {
+    private void windowsProfile(MainActivity activity) throws Exception {windowsProfile(activity,"26100");}
+    private void windowsProfile(MainActivity activity,String build) throws Exception {
         java.util.Map<String,String> values=new java.util.HashMap<>();
         values.put("NAME","Windows Setup");values.put("WINDOWS/ARCH","9");
-        values.put("WINDOWS/VERSION/BUILD","26100");values.put("WINDOWS/LANGUAGES/LANGUAGE","en-US");
+        values.put("WINDOWS/VERSION/BUILD",build);values.put("WINDOWS/LANGUAGES/LANGUAGE","en-US");
         Class<?> type=Class.forName("pl.rufusportable.MainActivity$WindowsProfile");
         var constructor=type.getDeclaredConstructor(java.util.List.class,int.class,WimMetadata.Image.class,java.util.List.class);
         constructor.setAccessible(true);
@@ -185,6 +186,22 @@ public class StartScreenTest {
             assertEquals(2,options.editionIndex);
             ((android.widget.CheckBox)find(root,"Pomiń pytania o zbieranie danych")).setChecked(false);
             assertFalse(silent.isChecked());assertEquals(View.GONE,((View)silent.getParent()).getVisibility());
+        }
+    }
+    @Test public void ca2023AndPolicyRequireNewWindowsBuildAndPersistWithSMode() throws Exception {
+        Shadows.shadowOf(RuntimeEnvironment.getApplication()).grantPermissions(
+                "pl.rufusportable.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION");
+        String ca="Użyj bootloaderów Windows CA 2023",policy="Zastosuj zasadę Secure Boot SkuSiPolicy",mode="Wymuś tryb Windows S (zaawansowane)";
+        try(var controller=Robolectric.buildActivity(MainActivity.class).setup()) {
+            windowsProfile(controller.get());var dialog=windowsDialog(controller.get());View root=dialog.getWindow().getDecorView();
+            assertEquals(View.GONE,find(root,ca).getVisibility());assertEquals(View.GONE,find(root,policy).getVisibility());dialog.dismiss();
+            windowsProfile(controller.get(),"26300");dialog=windowsDialog(controller.get());root=dialog.getWindow().getDecorView();
+            for(String title:new String[]{ca,policy,mode}) {
+                var check=(android.widget.CheckBox)find(root,title);assertEquals(View.VISIBLE,check.getVisibility());check.setChecked(true);
+            }
+            dialog.getButton(-1).performClick();assertFalse(dialog.isShowing());
+            controller.recreate();windowsProfile(controller.get(),"26300");dialog=windowsDialog(controller.get());root=dialog.getWindow().getDecorView();
+            for(String title:new String[]{ca,policy,mode})assertTrue(((android.widget.CheckBox)find(root,title)).isChecked());
         }
     }
     @Test public void existingOemAnswerSkipsCustomizationControls() throws Exception {

@@ -170,4 +170,53 @@ public class WimProxyTest {
         } finally {assertTrue(target.delete());}
     }
 
+    private byte[] bytes(InputStream input) throws IOException {
+        try(InputStream source=input;ByteArrayOutputStream out=new ByteArrayOutputStream()) {
+            byte[] buffer=new byte[8192];int count;while((count=source.read(buffer))!=-1)out.write(buffer,0,count);return out.toByteArray();
+        }
+    }
+    private void removeTree(File file) {
+        if(file.isDirectory())for(File child:Objects.requireNonNull(file.listFiles()))removeTree(child);
+        assertTrue(file.delete());
+    }
+    @Test public void extractsCa2023ResourcesFromIsoInstallsAndCompactsTargetWim() throws Exception {
+        Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
+        File source=File.createTempFile("ca-source-", ".iso",context.getCacheDir());
+        File target=File.createTempFile("ca-target-", ".img",context.getCacheDir());
+        File extracted=new File(context.getCacheDir(),"ca-files-"+System.nanoTime());assertTrue(extracted.mkdir());
+        try {
+            try(OutputStream out=new FileOutputStream(source)) {
+                out.write(bytes(InstrumentationRegistry.getInstrumentation().getContext().getAssets().open("windows-test.iso")));
+            }
+            ImageFile image=ImageFile.describe(context,Uri.fromFile(source));
+            List<IsoTree.Entry> entries=image.contents(context);
+            IsoTree.Entry boot=entries.stream().filter(e->e.path.equalsIgnoreCase("sources/boot.wim")).findFirst().get();
+            try(ProxyImageFile proxy=new ProxyImageFile(context,image,boot)) {
+                WimMetadata.requireEditable(proxy.path());
+                WimMetadata.extractFile(proxy.path(),2,"Windows/Boot/EFI_EX",extracted.getAbsolutePath());
+                WimMetadata.extractFile(proxy.path(),2,"Windows/Boot/Fonts_EX",extracted.getAbsolutePath());
+            }
+            Map<String,File> files=WindowsBootFiles.plan(entries,extracted);
+            WindowsUnattend.Options options=new WindowsUnattend.Options();options.flags=WindowsUnattend.USE_MS2023_BOOTLOADERS;
+            WindowsCustomization plan=new WindowsCustomization(entries,options.flags,26300,WindowsUnattend.create(options),
+                    entry->image.openEntry(context,entry),name->{throw new AssertionError();},files);
+            assertTrue(plan.compactBootWim);assertFalse(plan.answerInBootWim);
+            try(FileDisk disk=new FileDisk(target)) {
+                var installer=new WindowsInstaller(plan.entries,disk.size(),4096);
+                installer.install(disk,entry->plan.open(e->image.openEntry(context,e),entry),"CA2023",4096,true,
+                        bytes(context.getAssets().open("rufus/br_ntfs_0x0.bin")),bytes(context.getAssets().open("rufus/br_ntfs_0x54.bin")),
+                        true,(verify,path,done,total)->{});
+                try(NtfsVolume volume=new NtfsVolume(disk);ProxyNtfsFile proxy=new ProxyNtfsFile(context,volume.openRandom(plan.bootWimPath))) {
+                    long size=WimMetadata.compact(proxy.path(),2);assertTrue(size>0);proxy.completeUpdate(size);
+                }
+                disk.sync();
+                try(NtfsVolume volume=new NtfsVolume(disk);ProxyNtfsFile proxy=new ProxyNtfsFile(context,volume.openRandom(plan.bootWimPath))) {
+                    WimMetadata.verify(proxy.path());assertEquals(2,WimMetadata.read(proxy.path()).size());
+                    for(var entry:files.entrySet())assertArrayEquals(bytes(new FileInputStream(entry.getValue())),bytes(volume.open(entry.getKey())));
+                    assertArrayEquals(plan.answer,bytes(volume.open("sources/$OEM$/$$/Panther/unattend.xml")));
+                }
+            }
+        } finally {removeTree(extracted);assertTrue(source.delete());assertTrue(target.delete());}
+    }
+
 }

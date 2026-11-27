@@ -9,7 +9,8 @@ final class WindowsCustomization {
     final List<IsoTree.Entry> entries;
     final byte[] answer;
     final String bootWimPath;
-    final boolean answerInBootWim;
+    final boolean answerInBootWim,compactBootWim;
+    private final Map<String,File> external=new HashMap<>();
     private final Map<String,byte[]> generated=new HashMap<>();
     private final List<IsoTree.Entry> working;
     private final Map<String,IsoTree.Entry> paths=new HashMap<>();
@@ -17,17 +18,26 @@ final class WindowsCustomization {
 
     WindowsCustomization(List<IsoTree.Entry> original,int flags,int build,byte[] xml,
             WindowsInstaller.Source source,Resources resources) throws IOException {
+        this(original,flags,build,xml,source,resources,Collections.emptyMap());
+    }
+    WindowsCustomization(List<IsoTree.Entry> original,int flags,int build,byte[] xml,
+            WindowsInstaller.Source source,Resources resources,Map<String,File> bootFiles) throws IOException {
         working=new ArrayList<>(original);
         answer=xml.clone();
         for(IsoTree.Entry entry:working) {
             if(paths.put(key(entry.path),entry)!=null)throw new IOException("Powtórzona ścieżka instalatora.");
         }
-        if((flags&(WindowsUnattend.WINDOWS_TO_GO|WindowsUnattend.USE_MS2023_BOOTLOADERS|
-                WindowsUnattend.OFFLINE_INTERNAL_DRIVES|WindowsUnattend.FORCE_S_MODE))!=0)
+        if((flags&(WindowsUnattend.WINDOWS_TO_GO|WindowsUnattend.OFFLINE_INTERNAL_DRIVES))!=0)
             throw new IOException("Te opcje wymagają osobnego trybu przygotowania Windows.");
         answerInBootWim=(flags&(WindowsUnattend.BYPASS_REQUIREMENTS|WindowsUnattend.SILENT_INSTALL))!=0;
+        compactBootWim=answerInBootWim || (flags&WindowsUnattend.USE_MS2023_BOOTLOADERS)!=0;
         IsoTree.Entry boot=paths.get(key("sources/boot.wim"));
         bootWimPath=boot==null?null:boot.path;
+        if(compactBootWim && (boot==null || boot.directory))throw new IOException("Brak sources/boot.wim.");
+        if((flags&WindowsUnattend.USE_MS2023_BOOTLOADERS)!=0) {
+            if(build<26200 || bootFiles.isEmpty())throw new IOException("Brak przygotowanych bootloaderów Windows CA 2023.");
+            for(Map.Entry<String,File> item:bootFiles.entrySet())addExternal(item.getKey(),item.getValue());
+        } else if(!bootFiles.isEmpty())throw new IOException("Nie wybrano bootloaderów Windows CA 2023.");
         if(flags!=0) {
             if(answer.length==0)throw new IOException("Brak pliku odpowiedzi Windows.");
             if(answerInBootWim) {
@@ -42,7 +52,11 @@ final class WindowsCustomization {
     }
     InputStream open(WindowsInstaller.Source source,IsoTree.Entry entry) throws IOException {
         byte[] bytes=generated.get(entry.path);
-        return bytes==null?source.open(entry):new ByteArrayInputStream(bytes);
+        if(bytes!=null)return new ByteArrayInputStream(bytes);
+        File file=external.get(entry.path);
+        if(file==null)return source.open(entry);
+        if(file.length()!=entry.length)throw new IOException("Zmieniono przygotowany plik bootloadera.");
+        return new FileInputStream(file);
     }
     private String directory(String requested) throws IOException {
         String parent="";
@@ -67,6 +81,18 @@ final class WindowsCustomization {
         }
         IsoTree.Entry entry=new IsoTree.Entry(path,false,data.length,Collections.emptyList());
         working.add(entry);paths.put(key(path),entry);generated.put(path,data.clone());
+    }
+    private void addExternal(String requested,File file) throws IOException {
+        if(!file.isFile())throw new IOException("Brak przygotowanego pliku bootloadera.");
+        int slash=requested.lastIndexOf('/');
+        String path=slash<0?requested:directory(requested.substring(0,slash))+requested.substring(slash);
+        IsoTree.Entry existing=paths.get(key(path));
+        if(existing!=null) {
+            if(existing.directory)throw new IOException("Katalog zajmuje ścieżkę bootloadera: "+path);
+            working.remove(existing);path=existing.path;
+        }
+        IsoTree.Entry replacement=new IsoTree.Entry(path,false,file.length(),Collections.emptyList());
+        working.add(replacement);paths.put(key(path),replacement);external.put(path,file);
     }
     private void move(IsoTree.Entry entry,String destination,boolean replace) throws IOException {
         IsoTree.Entry existing=paths.get(key(destination));

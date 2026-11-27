@@ -72,6 +72,7 @@ final class WimMetadata {
             throw new IOException("Nieprawidłowe parametry wypakowania WIM.");
         extract(path,image,target.getBytes(StandardCharsets.UTF_8),directory.getBytes(StandardCharsets.UTF_8));
     }
+    static native long compact(String path,int image) throws IOException;
     static native void requireEditable(String path) throws IOException;
     static void verify(String path) throws IOException {verifyWim(path);}
     private static native void verifyWim(String path) throws IOException;

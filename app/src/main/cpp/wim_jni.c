@@ -151,6 +151,27 @@ JNIEXPORT jlong JNICALL Java_pl_rufusportable_WimMetadata_update(
     return final_size;
 }
 
+JNIEXPORT jlong JNICALL Java_pl_rufusportable_WimMetadata_compact(
+        JNIEnv *env,jclass type,jstring filename,jint image)
+{
+    (void)type;
+    pthread_once(&initialization,initialize_wim);
+    if(initialization_error) {throw_error(env,wimlib_get_error_string(initialization_error));return -1;}
+    if(!filename || image<1) {throw_error(env,"Invalid WIM compact parameters");return -1;}
+    const char *path=(*env)->GetStringUTFChars(env,filename,NULL);
+    if(!path)return -1;
+    WIMStruct *wim=NULL;
+    int result=wimlib_open_wim(path,WIMLIB_OPEN_FLAG_WRITE_ACCESS,&wim);
+    (*env)->ReleaseStringUTFChars(env,filename,path);
+    jlong final_size=-1;
+    if(!result)result=wimlib_update_image(wim,image,NULL,0,0);
+    if(!result)result=wimlib_overwrite(wim,WIMLIB_WRITE_FLAG_FSYNC|WIMLIB_WRITE_FLAG_UNSAFE_COMPACT,1);
+    if(!result)final_size=wim->out_fd.offset;
+    wimlib_free(wim);
+    if(result)throw_error(env,wimlib_get_error_string(result));
+    return final_size;
+}
+
 JNIEXPORT void JNICALL Java_pl_rufusportable_WimMetadata_extract(
         JNIEnv *env,jclass type,jstring filename,jint image,jbyteArray target,jbyteArray directory)
 {

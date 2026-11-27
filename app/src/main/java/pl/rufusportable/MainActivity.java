@@ -446,17 +446,27 @@ public class MainActivity extends AppCompatActivity {
         label(box,"Dostosuj instalację Windows do swoich potrzeb.",16,false);
         int[] bits={WindowsUnattend.BYPASS_REQUIREMENTS,WindowsUnattend.NO_ONLINE_ACCOUNT,
                 WindowsUnattend.SET_USER,WindowsUnattend.NO_DATA_COLLECTION,WindowsUnattend.DUPLICATE_LOCALE,
-                WindowsUnattend.DISABLE_BITLOCKER,WindowsUnattend.QOL_ENHANCEMENTS};
+                WindowsUnattend.DISABLE_BITLOCKER,WindowsUnattend.QOL_ENHANCEMENTS,
+                WindowsUnattend.USE_MS2023_BOOTLOADERS,WindowsUnattend.APPLY_SKUSIPOLICY,WindowsUnattend.FORCE_S_MODE};
         String[] titles={"Pomiń wymagania TPM, Secure Boot i RAM","Nie wymagaj konta Microsoft", "Utwórz konto lokalne",
                 "Pomiń pytania o zbieranie danych", "Ustaw język, region i strefę czasową", "Wyłącz automatyczne szyfrowanie BitLocker",
-                "Zastosuj usprawnienia Rufusa"};
+                "Zastosuj usprawnienia Rufusa", "Użyj bootloaderów Windows CA 2023",
+                "Zastosuj zasadę Secure Boot SkuSiPolicy", "Wymuś tryb Windows S (zaawansowane)"};
         CheckBox[] checks=new CheckBox[bits.length];
         for(int i=0;i<bits.length;i++) {
             CheckBox check=checkbox(titles[i],(windowsFlags&bits[i])!=0);
-            if(((i==0 || i==5 || i==6) && windowsProfile.build<22000) || (i==1 && windowsProfile.build<22500)) {
+            if(((i==0 || i==5 || i==6) && windowsProfile.build<22000) || (i==1 && windowsProfile.build<22500) || ((i==7 || i==8) && windowsProfile.build<26200)) {
                 check.setChecked(false);check.setVisibility(View.GONE);
             }
             box.addView(check);checks[i]=check;
+            if(i>=7) {
+                String explanation=i==7?"Wymaga aktualnych certyfikatów Secure Boot komputera, w tym Windows UEFI CA 2023.":
+                        i==8?"Unieważnia dodatkowe bootloadery. Może też uniemożliwić uruchamianie standardowych nośników Windows.":
+                        "System może pozostać zablokowany w trybie S nawet po wymazaniu dysku i ponownej instalacji Windows.";
+                TextView detail=label(box,explanation,14,false);
+                detail.setVisibility(check.isChecked()?View.VISIBLE:View.GONE);
+                check.setOnCheckedChangeListener((v,checked)->detail.setVisibility(checked?View.VISIBLE:View.GONE));
+            }
         }
         TextView accountCaption=label(box,"Nazwa konta lokalnego",16,true);
         EditText account=new EditText(this);account.setMinHeight(dp(48));account.setSingleLine();account.setText(windowsUser);box.addView(account);
@@ -646,6 +656,7 @@ public class MainActivity extends AppCompatActivity {
         ImageFile input=image;
         long expectedCapacity=capacity;
         preparation=diskWork.submit(()->{
+            File bootFilesDirectory=null;
             try (InputStream accessible=input.uri==null?null:input.open(this);
                  UsbDisk disk=new UsbDisk(usb,selected,selectedLun)) {
                 if (accessible!=null) {
@@ -670,9 +681,22 @@ public class MainActivity extends AppCompatActivity {
                     if(windowsFlags!=0 && (windowsProfile==null || !windowsProfile.existingAnswer)) {
                         if(windowsProfile==null)throw new IOException("Wybierz ponownie ustawienia Windows.");
                         WindowsUnattend.Options options=windowsSettings(windowsFlags,windowsUser,windowsLocale,windowsTimezone);
+                        Map<String,File> bootFiles=Collections.emptyMap();
+                        if((windowsFlags&WindowsUnattend.USE_MS2023_BOOTLOADERS)!=0) {
+                            bootFilesDirectory=File.createTempFile("rufus-boot-", "",getCacheDir());
+                            if(!bootFilesDirectory.delete() || !bootFilesDirectory.mkdir())throw new IOException("Nie można utworzyć katalogu bootloaderów.");
+                            IsoTree.Entry boot=entries.stream().filter(e->!e.directory && e.path.equalsIgnoreCase("sources/boot.wim"))
+                                    .findFirst().orElseThrow(()->new IOException("Brak boot.wim."));
+                            ui(()->status.setText("Odczytywanie bootloaderów Windows CA 2023…"));
+                            try(ProxyImageFile proxy=new ProxyImageFile(this,input,boot)) {
+                                WimMetadata.extractFile(proxy.path(),windowsProfile.setupIndex,"Windows/Boot/EFI_EX",bootFilesDirectory.getAbsolutePath());
+                                WimMetadata.extractFile(proxy.path(),windowsProfile.setupIndex,"Windows/Boot/Fonts_EX",bootFilesDirectory.getAbsolutePath());
+                            }
+                            bootFiles=WindowsBootFiles.plan(entries,bootFilesDirectory);
+                        }
                         customization=new WindowsCustomization(entries,windowsFlags,windowsProfile.build,WindowsUnattend.create(options),
-                                entry->input.openEntry(this,entry),this::bootResource);
-                        if(customization.answerInBootWim) {
+                                entry->input.openEntry(this,entry),this::bootResource,bootFiles);
+                        if(customization.compactBootWim) {
                             String bootPath=customization.bootWimPath;
                             IsoTree.Entry boot=entries.stream().filter(e->e.path.equals(bootPath)).findFirst().orElseThrow(()->new IOException("Brak boot.wim."));
                             try(ProxyImageFile proxy=new ProxyImageFile(this,input,boot)){WimMetadata.requireEditable(proxy.path());}
@@ -740,13 +764,14 @@ public class MainActivity extends AppCompatActivity {
                                     ui(()->{status.setText((verify?"Weryfikacja":"Zapisywanie")+" · "+percent+"%\n"+path);progress.setProgressCompat(percent,percent>0);});
                                 }
                             });
-                    if(plan!=null && plan.answerInBootWim)applyWindowsAnswer(partition,plan,windowsProfile.setupIndex);
+                    if(plan!=null && plan.compactBootWim)applyWindowsAnswer(partition,plan,windowsProfile.setupIndex);
                 }
                 ui(()->{
                     progress.setIndeterminate(false);progress.setProgressCompat(100,true); flashing=false; setBusy(false);
                     status.setText((verifyWrite?"Zapis zweryfikowany przez SHA-256. ":"Zapis zakończony. ")+(useIso?"Uruchom komputer z przygotowanego USB.":"Możesz odłączyć nośnik."));
                 });
             } catch (Exception e) { error(e); }
+            finally {if(bootFilesDirectory!=null)clear(bootFilesDirectory);}
         });
     }
     private void applyWindowsAnswer(BlockDevice partition,WindowsCustomization plan,int index) throws Exception {
@@ -759,7 +784,8 @@ public class MainActivity extends AppCompatActivity {
             ui(()->{status.setText("Dostosowywanie instalatora Windows…");progress.setIndeterminate(true);});
             try(NtfsVolume volume=new NtfsVolume(partition);
                 ProxyNtfsFile proxy=new ProxyNtfsFile(this,volume.openRandom(plan.bootWimPath))) {
-                try {proxy.completeUpdate(WimMetadata.addFile(proxy.path(),index,answer.getAbsolutePath(),"Autounattend.xml"));}
+                try {proxy.completeUpdate(plan.answerInBootWim?WimMetadata.addFile(proxy.path(),index,answer.getAbsolutePath(),"Autounattend.xml"):
+                        WimMetadata.compact(proxy.path(),index));}
                 catch(IOException error){if(proxy.failure()!=null)error.addSuppressed(proxy.failure());throw error;}
             }
             partition.sync();
@@ -767,10 +793,12 @@ public class MainActivity extends AppCompatActivity {
             try(NtfsVolume volume=new NtfsVolume(partition);
                 ProxyNtfsFile proxy=new ProxyNtfsFile(this,volume.openRandom(plan.bootWimPath))) {
                 WimMetadata.verify(proxy.path());
+                if(plan.answerInBootWim) {
                 WimMetadata.extractFile(proxy.path(),index,"Autounattend.xml",directory.getAbsolutePath());
                 try(InputStream input=new FileInputStream(new File(directory,"Autounattend.xml"))) {
                     for(byte expected:plan.answer)if(input.read()!=(expected&255))throw new IOException("Plik odpowiedzi WIM różni się od wybranych ustawień.");
                     if(input.read()!=-1)throw new IOException("Nieprawidłowy rozmiar pliku odpowiedzi WIM.");
+                }
                 }
             }
         } finally {answer.delete();if(directory!=null)clear(directory);}

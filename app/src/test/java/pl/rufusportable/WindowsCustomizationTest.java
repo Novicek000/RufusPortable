@@ -28,6 +28,13 @@ public class WindowsCustomizationTest {
         assertArrayEquals(answer,plan.open(e->{throw new AssertionError();},extra).readAllBytes());
         assertEquals(4,original.size());assertFalse(plan.answerInBootWim);
     }
+    @Test public void sModeAndSecureBootPolicyUseOemAnswerWithoutWinpeChanges() throws Exception {
+        int flags=WindowsUnattend.FORCE_S_MODE|WindowsUnattend.APPLY_SKUSIPOLICY|WindowsUnattend.SET_USER;
+        WindowsCustomization plan=new WindowsCustomization(tree(),flags,26300,new byte[]{1,2},
+                e->{throw new AssertionError();},n->{throw new AssertionError();});
+        assertFalse(plan.answerInBootWim);assertFalse(plan.compactBootWim);
+        assertNotNull(entry(plan,"sources/$OEM$/$$/Panther/unattend.xml"));
+    }
     @Test public void bypassBacksUpAppraiserAndInstallsMatchingOriginalSetupWrapper() throws Exception {
         byte[] originalSetup=pe(0x8664),wrapper=pe(0x8664);wrapper[200]=99;
         WindowsCustomization plan=new WindowsCustomization(tree(),WindowsUnattend.BYPASS_REQUIREMENTS,26100,
