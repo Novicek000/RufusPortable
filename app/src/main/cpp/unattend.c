@@ -340,7 +340,7 @@ char* rufus_unattend_xml(int arch, int flags, const rufus_unattend_options *opti
 			}
 			if (flags & UNATTEND_QOL_ENHANCEMENTS) {
 				uprintf("• QoL: Disable Fast Startup, Copilot, Recommendations, News and Teams by default");
-				// Disable Fast Startup 
+				// Disable Fast Startup
 				StrArrayAdd(&commands, "reg add \"HKLM\\System\\CurrentControlSet\\Control\\Session Manager\\Power\" "
 					"/v HiberbootEnabled /t REG_DWORD /d 0 /f", TRUE);
 				// Disable Copilot and set search as an icon rather than the default real-estate gobbler

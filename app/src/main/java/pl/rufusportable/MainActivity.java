@@ -14,6 +14,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.graphics.Insets;
 import androidx.core.view.*;
 import com.google.android.material.button.MaterialButton;
+import com.google.android.material.checkbox.MaterialCheckBox;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.progressindicator.LinearProgressIndicator;
 import java.io.*;
@@ -36,12 +37,38 @@ public class MainActivity extends AppCompatActivity {
     private TextView imageName, imageMeta, deviceName, deviceMeta, status, release;
     private LinearProgressIndicator progress;
     private String installed, newTag;
-    private MaterialButton settings, hash, other, wimInfo;
+    private MaterialButton settings, hash, other, wimInfo, windowsOptions;
     private boolean gpt, verifyWrite=true, useIso, testMedia, dos;
     private int ntfsClusterSize=4096, badBlockOption;
     private boolean detectFakeMedia=true;
     private boolean quickFormat=true;
     private String volumeLabel="RUFUS";
+    private WindowsProfile windowsProfile;
+    private boolean windowsReviewed,windowsConfigured;
+    private int windowsFlags;
+    private String windowsUser="",windowsLocale=Locale.getDefault().toLanguageTag(),windowsTimezone;
+    private static final class WindowsProfile {
+        final List<IsoTree.Entry> entries;
+        final int setupIndex,architecture,build;
+        final String language;
+        final boolean existingAnswer;
+        WindowsProfile(List<IsoTree.Entry> entries) {
+            this.entries=entries;setupIndex=0;architecture=0;build=0;language="";existingAnswer=true;
+        }
+        WindowsProfile(List<IsoTree.Entry> entries,int index,WimMetadata.Image setup) throws IOException {
+            this.entries=entries;setupIndex=index;
+            existingAnswer=entries.stream().anyMatch(e->!e.directory && e.path.equalsIgnoreCase("sources/$OEM$/$$/Panther/unattend.xml"));
+            switch(setup.architecture) {
+                case "0":architecture=1;break;
+                case "9":architecture=2;break;
+                case "5":architecture=3;break;
+                case "12":architecture=4;break;
+                default:throw new IOException("Nieobsługiwana architektura obrazu Windows.");
+            }
+            int number=0;try {number=Integer.parseInt(setup.build);}catch(NumberFormatException ignored){}
+            build=number;language=setup.language.isEmpty()?"en-US":setup.language;
+        }
+    }
     private Uri pickedUri;
     private Future<?> preparation;
 
@@ -75,6 +102,10 @@ public class MainActivity extends AppCompatActivity {
         f.addAction(UsbManager.ACTION_USB_DEVICE_DETACHED);
         androidx.core.content.ContextCompat.registerReceiver(this, receiver, f, androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED);
         if (state!=null) {
+            windowsFlags=state.getInt("windowsFlags");windowsUser=state.getString("windowsUser","");
+            windowsLocale=state.getString("windowsLocale",Locale.getDefault().toLanguageTag());
+            windowsTimezone=state.getString("windowsTimezone");windowsConfigured=state.getBoolean("windowsConfigured");
+            windowsReviewed=state.getBoolean("windowsReviewed");
             gpt=state.getBoolean("gpt"); verifyWrite=state.getBoolean("verify",true);
             ntfsClusterSize=state.getInt("ntfsCluster",4096); quickFormat=state.getBoolean("quick",true); volumeLabel=state.getString("label","RUFUS");
             String saved=state.getString("source");
@@ -88,6 +119,9 @@ public class MainActivity extends AppCompatActivity {
     @Override protected void onSaveInstanceState(Bundle state) {
         super.onSaveInstanceState(state);
         if (pickedUri!=null) state.putString("source",pickedUri.toString());
+        state.putInt("windowsFlags",windowsFlags);state.putString("windowsUser",windowsUser);
+        state.putString("windowsLocale",windowsLocale);state.putString("windowsTimezone",windowsTimezone);
+        state.putBoolean("windowsConfigured",windowsConfigured);state.putBoolean("windowsReviewed",windowsReviewed);
         state.putBoolean("builtin",image!=null && image.uri==null); state.putBoolean("dos",dos); state.putBoolean("testMedia",testMedia);
         state.putBoolean("iso",useIso); state.putBoolean("gpt",gpt); state.putBoolean("verify",verifyWrite);
         state.putInt("badBlockOption",badBlockOption);state.putBoolean("detectFakes",detectFakeMedia);
@@ -117,6 +151,12 @@ public class MainActivity extends AppCompatActivity {
                 com.google.android.material.R.attr.materialButtonStyle : com.google.android.material.R.attr.materialButtonOutlinedStyle);
         b.setText(title); b.setAllCaps(false); b.setMinHeight(dp(54)); b.setCornerRadius(dp(26));
         b.setOnClickListener(v -> action.run()); box.addView(b); return b;
+    }
+    private CheckBox checkbox(String title,boolean selected) {
+        MaterialCheckBox checkbox=new MaterialCheckBox(this);
+        checkbox.setText(title);checkbox.setChecked(selected);checkbox.setMinHeight(dp(48));
+        checkbox.setUseMaterialThemeColors(true);
+        return checkbox;
     }
     private LinearLayout card(int color, int radius) {
         LinearLayout box = column();
@@ -155,6 +195,7 @@ public class MainActivity extends AppCompatActivity {
                     else startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse("https://www.microsoft.com/pl-pl/software-download/windows11")));
                 }).setNegativeButton("Anuluj",null).show(),false);
         wimInfo=button(source,"Obrazy Windows w ISO",this::inspectWim,false);
+        windowsOptions=button(source,"Instalacja Windows",()->configureWindows(null),false);
         LinearLayout destination = card(R.color.panel,24);
         label(destination,"Nośnik docelowy",15,true);
         deviceName = label(destination,"Podłącz pendrive",22,true);
@@ -181,6 +222,7 @@ public class MainActivity extends AppCompatActivity {
         settings.setEnabled(!busy && image!=null);
         other.setEnabled(!busy);
         wimInfo.setVisibility(image!=null && image.iso?View.VISIBLE:View.GONE); wimInfo.setEnabled(!busy);
+        windowsOptions.setVisibility(image!=null && image.iso?View.VISIBLE:View.GONE);windowsOptions.setEnabled(!busy);
         hash.setVisibility(image==null || image.uri==null?View.GONE:View.VISIBLE); hash.setEnabled(!busy);
         choose.setEnabled(!busy); connect.setEnabled(!busy);
         write.setEnabled(flashing ? !cancel : !busy && image != null && target != null);
@@ -194,7 +236,7 @@ public class MainActivity extends AppCompatActivity {
     private void ui(Runnable r) { runOnUiThread(()->{ if (!isDestroyed() && !isFinishing()) r.run(); }); }
     private void error(Exception e) {
         ui(()->{
-            flashing=false; setBusy(false); progress.setVisibility(View.GONE);
+            flashing=false; setBusy(false); progress.setIndeterminate(false); progress.setVisibility(View.GONE);
             String message=e.getLocalizedMessage();
             status.setText(message == null ? "Operacja nie powiodła się." : message);
         });
@@ -210,6 +252,7 @@ public class MainActivity extends AppCompatActivity {
         select(data.getData(),null);
     }
     private void select(Uri uri,Boolean restoreMode) {
+        windowsProfile=null;if(restoreMode==null)windowsReviewed=false;
         pickedUri=uri;
         image=null; imageName.setText(uri.getLastPathSegment()); imageMeta.setText("Odczytywanie nagłówka…");
         status.setText("Sprawdzanie obrazu…"); setBusy(true);
@@ -228,6 +271,7 @@ public class MainActivity extends AppCompatActivity {
         });
     }
     private void builtin(boolean boot) {
+        windowsProfile=null;windowsReviewed=false;
         pickedUri=null; dos=boot; useIso=false; image=ImageFile.volume(boot);
         showImage(); status.setText(target==null?"Wybierz nośnik USB.":"Sprawdź opcje i rozpocznij zapis."); refresh();
     }
@@ -255,11 +299,11 @@ public class MainActivity extends AppCompatActivity {
         int clusterIndex=3;
         for(int i=0;i<clusterSizes.length;i++) if(clusterSizes[i]==ntfsClusterSize) clusterIndex=i;
         Spinner clusters=choices(isoBox,"Klaster NTFS",new String[]{"512 B","1 KiB","2 KiB","4 KiB","8 KiB","16 KiB","32 KiB","64 KiB","128 KiB","256 KiB","512 KiB","1 MiB","2 MiB"},clusterIndex);
-        CheckBox quick=new CheckBox(this); quick.setText("Szybkie formatowanie"); quick.setChecked(quickFormat); isoBox.addView(quick);
+        CheckBox quick=checkbox("Szybkie formatowanie",quickFormat); isoBox.addView(quick);
         LinearLayout volumeBox=column(); box.addView(volumeBox);
         volumeBox.setVisibility(useIso || image.uri==null?View.VISIBLE:View.GONE);
         TextView caption=label(volumeBox,"Etykieta woluminu",16,true);
-        EditText volume=new EditText(this); volume.setId(View.generateViewId()); caption.setLabelFor(volume.getId());
+        EditText volume=new EditText(this);volume.setMinHeight(dp(48)); volume.setId(View.generateViewId()); caption.setLabelFor(volume.getId());
         volume.setSingleLine(); volume.setText(volumeLabel); volumeBox.addView(volume);
         isoBox.setVisibility(useIso?View.VISIBLE:View.GONE);
         mode.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
@@ -269,13 +313,11 @@ public class MainActivity extends AppCompatActivity {
                 isoBox.setVisibility(active?View.VISIBLE:View.GONE); volumeBox.setVisibility(active || image.uri==null?View.VISIBLE:View.GONE);
             }
         });
-        CheckBox verify=new CheckBox(this); verify.setText("Sprawdź zapis przez SHA-256"); verify.setChecked(verifyWrite); box.addView(verify);
-        CheckBox surface=new CheckBox(this); surface.setText("Test uszkodzonych bloków przed zapisem");
-        surface.setChecked(testMedia); box.addView(surface);
+        CheckBox verify=checkbox("Sprawdź zapis przez SHA-256",verifyWrite); box.addView(verify);
+        CheckBox surface=checkbox("Test uszkodzonych bloków przed zapisem",testMedia); box.addView(surface);
         LinearLayout testBox=column();box.addView(testBox);
         Spinner patterns=choices(testBox,"Przebiegi testu",BadBlocks.OPTIONS,badBlockOption);
-        CheckBox fakes=new CheckBox(this);fakes.setText("Wykrywaj fałszywą pojemność");
-        fakes.setChecked(detectFakeMedia);testBox.addView(fakes);
+        CheckBox fakes=checkbox("Wykrywaj fałszywą pojemność",detectFakeMedia);testBox.addView(fakes);
         testBox.setVisibility(testMedia?View.VISIBLE:View.GONE);
         surface.setOnCheckedChangeListener((view,checked)->testBox.setVisibility(checked?View.VISIBLE:View.GONE));
         ScrollView scroll=new ScrollView(this); scroll.addView(box);
@@ -341,6 +383,105 @@ public class MainActivity extends AppCompatActivity {
                             .setMessage(message).setPositiveButton("Zamknij",null).show();
                 });
             } catch (Exception error) { error(error); }
+        });
+    }
+    private void configureWindows(Runnable afterApply) {
+        if(busy || image==null || !image.iso)return;
+        if(windowsProfile!=null){showWindowsOptions(afterApply);return;}
+        ImageFile selected=image;setBusy(true);status.setText("Odczytywanie ustawień instalatora Windows…");
+        preparation=diskWork.submit(()->{
+            try {
+                List<IsoTree.Entry> entries=selected.contents(this);
+                WindowsProfile profile;
+                if(entries.stream().anyMatch(e->!e.directory && e.path.equalsIgnoreCase("sources/$OEM$/$$/Panther/unattend.xml"))) {
+                    profile=new WindowsProfile(entries);
+                } else {
+                    IsoTree.Entry boot=entries.stream().filter(e->!e.directory && e.path.equalsIgnoreCase("sources/boot.wim"))
+                            .findFirst().orElseThrow(()->new IOException("W obrazie nie znaleziono instalatora Windows."));
+                    List<WimMetadata.Image> images;
+                    try(ProxyImageFile proxy=new ProxyImageFile(this,selected,boot)) {images=WimMetadata.read(proxy.path());}
+                    if(images.isEmpty())throw new IOException("boot.wim nie zawiera obrazów Windows.");
+                    int index=images.size()>=2?2:1;
+                    profile=new WindowsProfile(entries,index,images.get(index-1));
+                }
+                ui(()->{
+                    windowsProfile=profile;
+                    if(!windowsConfigured)windowsFlags=profile.build>=22000?
+                            WindowsUnattend.BYPASS_REQUIREMENTS|(profile.build>=22500?WindowsUnattend.NO_ONLINE_ACCOUNT:0):0;
+                    setBusy(false);
+                    if(windowsReviewed && afterApply!=null)afterApply.run();else showWindowsOptions(afterApply);
+                });
+            } catch(Exception error){error(error);}
+        });
+    }
+    private WindowsUnattend.Options windowsSettings(int flags,String user,String locale,String timezone) {
+        WindowsUnattend.Options options=new WindowsUnattend.Options();
+        options.flags=flags;options.username=user;options.architecture=windowsProfile.architecture;
+        options.inputLocale=locale;options.systemLocale=locale;options.userLocale=locale;options.uiLanguage=locale;
+        options.timezone=timezone;options.fallbackLanguage=windowsProfile.language;options.setupLanguage=windowsProfile.language;
+        return options;
+    }
+    private void showWindowsOptions(Runnable afterApply) {
+        if(windowsProfile.existingAnswer) {
+            windowsReviewed=true;
+            status.setText("Obraz zawiera własny plik odpowiedzi Windows.");
+            if(afterApply!=null){afterApply.run();return;}
+            new MaterialAlertDialogBuilder(this).setTitle("Ustawienia zapisane w obrazie")
+                    .setMessage("Obraz zawiera sources/$OEM$/$$/Panther/unattend.xml. Zgodnie z Rufusem zostanie użyta konfiguracja dostarczona z obrazem.")
+                    .setPositiveButton("Zamknij",null).show();return;
+        }
+        WindowsTimeZones zones;
+        try {zones=new WindowsTimeZones(getAssets().open("windows/timezones.properties"));}
+        catch(IOException error){error(error);return;}
+        if(windowsTimezone==null)windowsTimezone=zones.windowsZone(android.icu.util.TimeZone.getCanonicalID(TimeZone.getDefault().getID()));
+        LinearLayout box=column();pad(box,20,8);
+        label(box,"Dostosuj instalację Windows do swoich potrzeb.",16,false);
+        int[] bits={WindowsUnattend.BYPASS_REQUIREMENTS,WindowsUnattend.NO_ONLINE_ACCOUNT,
+                WindowsUnattend.SET_USER,WindowsUnattend.NO_DATA_COLLECTION,WindowsUnattend.DUPLICATE_LOCALE,
+                WindowsUnattend.DISABLE_BITLOCKER,WindowsUnattend.QOL_ENHANCEMENTS};
+        String[] titles={"Pomiń wymagania TPM, Secure Boot i RAM","Nie wymagaj konta Microsoft", "Utwórz konto lokalne",
+                "Pomiń pytania o zbieranie danych", "Ustaw język, region i strefę czasową", "Wyłącz automatyczne szyfrowanie BitLocker",
+                "Zastosuj usprawnienia Rufusa"};
+        CheckBox[] checks=new CheckBox[bits.length];
+        for(int i=0;i<bits.length;i++) {
+            CheckBox check=checkbox(titles[i],(windowsFlags&bits[i])!=0);
+            if(((i==0 || i==5 || i==6) && windowsProfile.build<22000) || (i==1 && windowsProfile.build<22500)) {
+                check.setChecked(false);check.setVisibility(View.GONE);
+            }
+            box.addView(check);checks[i]=check;
+        }
+        TextView accountCaption=label(box,"Nazwa konta lokalnego",16,true);
+        EditText account=new EditText(this);account.setMinHeight(dp(48));account.setSingleLine();account.setText(windowsUser);box.addView(account);
+        account.setId(View.generateViewId());accountCaption.setLabelFor(account.getId());
+        account.setEnabled(checks[2].isChecked());checks[2].setOnCheckedChangeListener((v,checked)->account.setEnabled(checked));
+        LinearLayout regionBox=column();box.addView(regionBox);
+        TextView localeCaption=label(regionBox,"Język i region (np. pl-PL)",16,true);
+        EditText locale=new EditText(this);locale.setMinHeight(dp(48));locale.setSingleLine();locale.setText(windowsLocale);regionBox.addView(locale);
+        locale.setId(View.generateViewId());localeCaption.setLabelFor(locale.getId());
+        int selected=zones.windows.indexOf(windowsTimezone);
+        if(selected<0)selected=zones.windows.indexOf("UTC");
+        Spinner timezone=choices(regionBox,"Strefa czasowa Windows",zones.windows.toArray(new String[0]),Math.max(0,selected));
+        regionBox.setVisibility(checks[4].isChecked()?View.VISIBLE:View.GONE);
+        checks[4].setOnCheckedChangeListener((v,checked)->regionBox.setVisibility(checked?View.VISIBLE:View.GONE));
+        ScrollView scroll=new ScrollView(this);scroll.addView(box);
+        var dialog=new MaterialAlertDialogBuilder(this).setTitle("Instalacja Windows").setView(scroll)
+                .setNegativeButton("Anuluj",null).setPositiveButton("Zastosuj",null).show();
+        dialog.getButton(-1).setOnClickListener(v->{
+            int flags=0;for(int i=0;i<bits.length;i++)if(checks[i].isChecked())flags|=bits[i];
+            String user=WindowsUnattend.sanitizeUsername(account.getText().toString()),region=locale.getText().toString().trim();
+            String zone=zones.windows.get(timezone.getSelectedItemPosition());
+            if(checks[2].isChecked() && !WindowsUnattend.validUsername(user)) {
+                account.setError("Wpisz poprawną nazwę konta, inną niż zastrzeżone nazwy Windows.");return;
+            }
+            if(checks[4].isChecked() && !region.matches("[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})*")) {
+                locale.setError("Wpisz oznaczenie języka i regionu, np. pl-PL.");return;
+            }
+            try {WindowsUnattend.validate(windowsSettings(flags,user,region,zone));}
+            catch(IOException error){account.setError(error.getMessage());return;}
+            windowsFlags=flags;windowsUser=user;windowsLocale=region;windowsTimezone=zone;
+            windowsConfigured=true;windowsReviewed=true;dialog.dismiss();
+            status.setText(flags==0?"Wybrano standardową instalację Windows.":"Zapis uwzględni wybrane ustawienia Windows.");
+            if(afterApply!=null)afterApply.run();
         });
     }
     private boolean connected(UsbDevice device) {
@@ -414,6 +555,7 @@ public class MainActivity extends AppCompatActivity {
                     .setPositiveButton("Przerwij",(d,w)->{cancel=true;if(preparation!=null)preparation.cancel(true);refresh();}).show(); return;
         }
         if (image==null || target==null) return;
+        if(useIso && image.uri!=null && (!windowsReviewed || windowsProfile==null)){configureWindows(this::writeAction);return;}
         if (image.length<0) {
             ImageFile selected=image; setBusy(true);
             status.setText("Dostawca nie podał rozmiaru. Liczenie bajtów przed potwierdzeniem zapisu…");
@@ -431,7 +573,10 @@ public class MainActivity extends AppCompatActivity {
         int selectedLun=targetLun;
         String method=image.uri==null?"MBR · FAT32 · "+volumeLabel:
                 useIso?(gpt?"GPT":"MBR")+" · NTFS · "+volumeLabel:"Zapis sektorowy DD";
-        String confirmation="\n\n"+method+(testMedia?"\nTest bloków: "+BadBlocks.OPTIONS[badBlockOption]+(detectFakeMedia?" · wykrywanie fałszywej pojemności":""):"")
+        int appliedWindowsFlags=windowsProfile!=null && !windowsProfile.existingAnswer?windowsFlags:0;
+        String confirmation="\n\n"+method+
+                (useIso && appliedWindowsFlags!=0?"\nPersonalizacja Windows: "+Integer.bitCount(appliedWindowsFlags)+" opcji":"")+
+                (useIso && (appliedWindowsFlags&WindowsUnattend.SET_USER)!=0?"\nKonto lokalne: "+windowsUser:"")+(testMedia?"\nTest bloków: "+BadBlocks.OPTIONS[badBlockOption]+(detectFakeMedia?" · wykrywanie fałszywej pojemności":""):"")
                 +"\nZapis zastąpi dane na tym nośniku."
                 +(image.uri!=null?" Plik źródłowy musi znajdować się poza wybranym pendrivem.":"")
                 +" Pozostaw aplikację otwartą do zakończenia operacji.";
@@ -441,7 +586,7 @@ public class MainActivity extends AppCompatActivity {
     }
     private void startWrite(UsbDevice selected,int selectedLun) {
         if (busy || target!=selected || targetLun!=selectedLun || !connected(selected)) {status.setText("Wybierz ponownie podłączony nośnik."); return;}
-        flashing=true; cancel=false; setBusy(true); progress.setVisibility(View.VISIBLE); progress.setProgress(0);
+        flashing=true; cancel=false; setBusy(true); progress.setIndeterminate(false); progress.setVisibility(View.VISIBLE); progress.setProgress(0);
         status.setText("Rozpoczynanie zapisu…");
         ImageFile input=image;
         long expectedCapacity=capacity;
@@ -459,13 +604,27 @@ public class MainActivity extends AppCompatActivity {
                 DiskLayout layout;
                 WindowsLayout windowsLayout=null;
                 WindowsInstaller windowsInstaller=null;
+                WindowsCustomization customization=null;
                 byte[] bootPrefix=null,bootCode=null;
                 if (input.uri==null) layout=Fat32.create(n->getAssets().open("freedos/"+n),disk.capacity,disk.blockSize,dos,volumeLabel);
                 else if (useIso) {
                     if (!WindowsInstaller.validLabel(volumeLabel)) throw new IOException("Nieprawidłowa etykieta NTFS.");
                     windowsLayout=WindowsLayout.create(disk.capacity,disk.blockSize,gpt,ntfsClusterSize,
                             bootResource("uefi-ntfs.img"),bootResource("mbr_win7.bin"));
-                    windowsInstaller=new WindowsInstaller(input.contents(this),windowsLayout.mainLength,ntfsClusterSize);
+                    List<IsoTree.Entry> entries=windowsProfile==null?input.contents(this):windowsProfile.entries;
+                    if(windowsFlags!=0 && (windowsProfile==null || !windowsProfile.existingAnswer)) {
+                        if(windowsProfile==null)throw new IOException("Wybierz ponownie ustawienia Windows.");
+                        WindowsUnattend.Options options=windowsSettings(windowsFlags,windowsUser,windowsLocale,windowsTimezone);
+                        customization=new WindowsCustomization(entries,windowsFlags,windowsProfile.build,WindowsUnattend.create(options),
+                                entry->input.openEntry(this,entry),this::bootResource);
+                        if(customization.answerInBootWim) {
+                            String bootPath=customization.bootWimPath;
+                            IsoTree.Entry boot=entries.stream().filter(e->e.path.equals(bootPath)).findFirst().orElseThrow(()->new IOException("Brak boot.wim."));
+                            try(ProxyImageFile proxy=new ProxyImageFile(this,input,boot)){WimMetadata.requireEditable(proxy.path());}
+                        }
+                        entries=customization.entries;
+                    }
+                    windowsInstaller=new WindowsInstaller(entries,windowsLayout.mainLength,ntfsClusterSize);
                     bootPrefix=bootResource("br_ntfs_0x0.bin"); bootCode=bootResource("br_ntfs_0x54.bin");
                     layout=windowsLayout.metadata;
                 }
@@ -515,7 +674,8 @@ public class MainActivity extends AppCompatActivity {
                         public void sync() throws IOException {raw.sync();}
                     };
                     final int[] lastFilePercent={-1};
-                    windowsInstaller.install(partition,entry->input.openEntry(this,entry),volumeLabel,ntfsClusterSize,
+                    WindowsCustomization plan=customization;
+                    windowsInstaller.install(partition,entry->plan==null?input.openEntry(this,entry):plan.open(e->input.openEntry(this,e),entry),volumeLabel,ntfsClusterSize,
                             quickFormat,bootPrefix,bootCode,verifyWrite,(verify,path,done,total)->{
                                 if (cancel || Thread.currentThread().isInterrupted()) throw new InterruptedIOException("Przerwano operację.");
                                 int percent=total==0?0:(int)(100.0*done/total);
@@ -525,13 +685,40 @@ public class MainActivity extends AppCompatActivity {
                                     ui(()->{status.setText((verify?"Weryfikacja":"Zapisywanie")+" · "+percent+"%\n"+path);progress.setProgressCompat(percent,percent>0);});
                                 }
                             });
+                    if(plan!=null && plan.answerInBootWim)applyWindowsAnswer(partition,plan,windowsProfile.setupIndex);
                 }
                 ui(()->{
-                    progress.setProgressCompat(100,true); flashing=false; setBusy(false);
+                    progress.setIndeterminate(false);progress.setProgressCompat(100,true); flashing=false; setBusy(false);
                     status.setText((verifyWrite?"Zapis zweryfikowany przez SHA-256. ":"Zapis zakończony. ")+(useIso?"Uruchom komputer z przygotowanego USB.":"Możesz odłączyć nośnik."));
                 });
             } catch (Exception e) { error(e); }
         });
+    }
+    private void applyWindowsAnswer(BlockDevice partition,WindowsCustomization plan,int index) throws Exception {
+        File answer=File.createTempFile("rufus-answer-", ".xml",getCacheDir());
+        File directory=null;
+        try {
+            directory=File.createTempFile("rufus-wim-check-", "",getCacheDir());
+            if(!directory.delete() || !directory.mkdir())throw new IOException("Nie można utworzyć katalogu kontroli WIM.");
+            try(OutputStream output=new FileOutputStream(answer)){output.write(plan.answer);}
+            ui(()->{status.setText("Dostosowywanie instalatora Windows…");progress.setIndeterminate(true);});
+            try(NtfsVolume volume=new NtfsVolume(partition);
+                ProxyNtfsFile proxy=new ProxyNtfsFile(this,volume.openRandom(plan.bootWimPath))) {
+                try {proxy.completeUpdate(WimMetadata.addFile(proxy.path(),index,answer.getAbsolutePath(),"Autounattend.xml"));}
+                catch(IOException error){if(proxy.failure()!=null)error.addSuppressed(proxy.failure());throw error;}
+            }
+            partition.sync();
+            ui(()->status.setText("Sprawdzanie zmodyfikowanego instalatora Windows…"));
+            try(NtfsVolume volume=new NtfsVolume(partition);
+                ProxyNtfsFile proxy=new ProxyNtfsFile(this,volume.openRandom(plan.bootWimPath))) {
+                WimMetadata.verify(proxy.path());
+                WimMetadata.extractFile(proxy.path(),index,"Autounattend.xml",directory.getAbsolutePath());
+                try(InputStream input=new FileInputStream(new File(directory,"Autounattend.xml"))) {
+                    for(byte expected:plan.answer)if(input.read()!=(expected&255))throw new IOException("Plik odpowiedzi WIM różni się od wybranych ustawień.");
+                    if(input.read()!=-1)throw new IOException("Nieprawidłowy rozmiar pliku odpowiedzi WIM.");
+                }
+            }
+        } finally {answer.delete();if(directory!=null)clear(directory);}
     }
     private int badBlockDecision(BadBlocks.Report report) throws Exception {
         CompletableFuture<Integer> answer=new CompletableFuture<>();

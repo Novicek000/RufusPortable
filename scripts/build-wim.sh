@@ -38,7 +38,7 @@ for abi in "${@:-arm64-v8a}"; do
         make -j"${BUILD_JOBS:-2}" libwim.la
         output_dir="$native_root/jniLibs/$abi"
         mkdir -p "$output_dir"
-        "$toolchain/$compiler" -shared -std=gnu11 -fPIC -fvisibility=hidden \
+        "$toolchain/$compiler" -D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64 -D_GNU_SOURCE -shared -std=gnu11 -fPIC -fvisibility=hidden \
             -ffunction-sections -fdata-sections -O2 -Wall -Wextra -Werror \
             -I "$build_dir" -I "$source_dir/include" \
             "$bridge_dir/wim_jni.c" "$bridge_dir/wim_glob.c" "$bridge_dir/unattend.c" ".libs/libwim.a" \

@@ -5,18 +5,22 @@ import android.os.*;
 import android.os.storage.StorageManager;
 import android.system.*;
 import java.io.*;
+import java.util.concurrent.*;
 
 /** A writable AppFuse view of an NTFS file on the target disk; owns the file. */
 final class ProxyNtfsFile implements Closeable {
     private final NtfsVolume.RandomFile file;
     private final HandlerThread thread;
     private final ParcelFileDescriptor proxy;
+    private final Handler handler;
+    private final CountDownLatch released=new CountDownLatch(1);
     private volatile IOException ioFailure;
 
     ProxyNtfsFile(Context context,NtfsVolume.RandomFile file) throws IOException {
         this.file=file;
         Thread owner=Thread.currentThread();
         thread=new HandlerThread("rufus-ntfs-file");thread.start();
+        handler=new Handler(thread.getLooper());
         try {
             StorageManager storage=(StorageManager)context.getSystemService(Context.STORAGE_SERVICE);
             proxy=storage.openProxyFileDescriptor(ParcelFileDescriptor.MODE_READ_WRITE,
@@ -47,8 +51,9 @@ final class ProxyNtfsFile implements Closeable {
                         }
                         @Override public void onRelease() {
                             try {file.close();}catch(IOException error){record(error);}
+                            finally {released.countDown();thread.quitSafely();}
                         }
-                    },new Handler(thread.getLooper()));
+                    },handler);
         } catch(IOException | RuntimeException error) {
             thread.quitSafely();
             try {file.close();}catch(IOException closing){error.addSuppressed(closing);}
@@ -61,14 +66,20 @@ final class ProxyNtfsFile implements Closeable {
     }
     String path() {return "/proc/self/fd/"+proxy.getFd();}
     IOException failure() {return ioFailure;}
+    void completeUpdate(long length) throws IOException {
+        if(length<212)throw new IOException("Nieprawidłowy rozmiar zmodyfikowanego WIM.");
+        file.truncate(length);file.sync();
+    }
     @Override public void close() throws IOException {
         IOException failure=null;
+        handler.postDelayed(thread::quitSafely,5000);
         // Native WIM calls have released their duplicate descriptors by now.
         // Close synchronously so a metadata-flush error cannot be hidden in
         // the asynchronous AppFuse onRelease callback.
         try {file.close();}catch(IOException error){failure=error;}
         try {proxy.close();}catch(IOException error){if(failure==null)failure=error;else failure.addSuppressed(error);}
-        finally {thread.quitSafely();}
+        try {if(Thread.currentThread()!=thread)released.await(2,TimeUnit.SECONDS);}
+        catch(InterruptedException cancelled){Thread.currentThread().interrupt();}
         if(failure!=null) throw failure;
     }
 }

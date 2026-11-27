@@ -10,7 +10,7 @@ public final class WimMetadataTest {
         var first=images.get(0);
         if(first.index!=1 || !first.name.equals("Windows Test żółć") ||
                 !first.architecture.equals("9") || !first.edition.equals("Professional") ||
-                !first.build.equals("26100") || !first.platform().equals("x64"))
+                !first.build.equals("26100") || !first.platform().equals("x64") || !first.language.equals("en-US"))
             throw new AssertionError("first image metadata");
         var second=images.get(1);
         if(second.index!=2 || !second.name.equals("Windows Test 😀") ||
@@ -24,11 +24,21 @@ public final class WimMetadataTest {
                 throw new AssertionError("invalid WIM accepted");
             } catch(IOException expected) {}
         } finally { Files.delete(invalid); }
+        try {WimMetadata.requireEditable(args[1]);throw new AssertionError("pipable WIM accepted for target customization");}
+        catch(IOException expected) {}
+        Path readonly=Files.createTempFile(Path.of(args[0]).getParent(),"readonly-wim-",".wim");
+        try {
+            byte[] marked=Files.readAllBytes(Path.of(args[0]));marked[16]|=4;Files.write(readonly,marked);
+            try {WimMetadata.requireEditable(readonly.toString());throw new AssertionError("marked readonly WIM accepted");}
+            catch(IOException expected) {}
+        } finally {Files.delete(readonly);}
         Path source=Path.of(args[0]).getParent().resolve("żółć.xml");
         String text="<?xml version=\"1.0\" encoding=\"UTF-8\"?><test>żółć 😀</test>";
         Files.writeString(source,text);
         try {
-            WimMetadata.addFile(args[0],2,source.toString(),"Autounattend.xml");
+            WimMetadata.requireEditable(args[0]);
+            long updatedLength=WimMetadata.addFile(args[0],2,source.toString(),"Autounattend.xml");
+            if(updatedLength!=Files.size(Path.of(args[0])))throw new AssertionError("compacted WIM length mismatch");
             Path extracted=Files.createTempDirectory(source.getParent(),"extract-wim-");
             try {
                 WimMetadata.extractFile(args[0],2,"Autounattend.xml",extracted.toString());

@@ -76,11 +76,14 @@ public class WimProxyTest {
     private static final class FileDisk implements BlockDevice,Closeable {
         final RandomAccessFile file;
         boolean failSync;
-        FileDisk(File path) throws IOException {file=new RandomAccessFile(path,"rw");file.setLength(128L<<20);}
-        public long size(){return 128L<<20;}
+        final long capacity;
+        long highestWrite;
+        FileDisk(File path) throws IOException {this(path,128L<<20);}
+        FileDisk(File path,long capacity) throws IOException {this.capacity=capacity;file=new RandomAccessFile(path,"rw");file.setLength(capacity);}
+        public long size(){return capacity;}
         public int sectorSize(){return 512;}
         public synchronized void read(long offset,byte[] data)throws IOException{file.seek(offset);file.readFully(data);}
-        public synchronized void write(long offset,byte[] data)throws IOException{file.seek(offset);file.write(data);}
+        public synchronized void write(long offset,byte[] data)throws IOException{highestWrite=Math.max(highestWrite,offset+data.length);file.seek(offset);file.write(data);}
         public void sync()throws IOException{if(failSync)throw new IOException("injected target sync failure");file.getFD().sync();}
         public void close()throws IOException{file.close();}
     }
@@ -109,7 +112,8 @@ public class WimProxyTest {
                     try(ProxyNtfsFile proxy=new ProxyNtfsFile(context,volume.openRandom("sources/boot.wim"))) {
                         disk.failSync=failSync;
                         try {
-                            WimMetadata.addFile(proxy.path(),2,answer.getAbsolutePath(),"Autounattend.xml");
+                            long updatedLength=WimMetadata.addFile(proxy.path(),2,answer.getAbsolutePath(),"Autounattend.xml");
+                            proxy.completeUpdate(updatedLength);
                             if(failSync)fail("Target sync failure was ignored");
                             assertNull(proxy.failure());
                         } catch(IOException error) {
@@ -148,6 +152,22 @@ public class WimProxyTest {
     }
     @Test public void wimUpdatePropagatesTargetSyncFailure() throws Exception {
         updateTargetWim(true);
+    }
+
+    @Test public void nativeNtfsUsesHighOffsetsOnLargeSparseTarget() throws Exception {
+        Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
+        File target=File.createTempFile("ntfs-large-", ".img",context.getCacheDir());
+        try(FileDisk disk=new FileDisk(target,64L<<30)) {
+            NtfsVolume.format(disk,"LARGE_TEST",4096,2048,true);
+            disk.highestWrite=0;
+            byte[] contents=new byte[170003];new Random(19).nextBytes(contents);
+            try(NtfsVolume volume=new NtfsVolume(disk);OutputStream file=volume.create("high-offset.bin")) {file.write(contents);}
+            assertTrue("NTFS data allocation did not exercise a 64-bit byte offset",disk.highestWrite>0xffffffffL);
+            try(NtfsVolume volume=new NtfsVolume(disk);InputStream file=volume.open("high-offset.bin")) {
+                byte[] actual=new byte[contents.length];new DataInputStream(file).readFully(actual);
+                assertEquals(-1,file.read());assertArrayEquals(contents,actual);
+            }
+        } finally {assertTrue(target.delete());}
     }
 
 }

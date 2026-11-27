@@ -12,7 +12,16 @@
 +#else
 @@ -2215,0 +2224 @@
 +#endif
-@@ -3365,0 +3375,6 @@
+@@ -2436 +2445,7 @@
+-		if (ftruncate(wim->out_fd.fd, wim->out_fd.offset) &&
++        bool defer_truncate = false;
++#ifdef __ANDROID__
++        /* AppFuse has no truncate callback. JNI returns out_fd.offset and the
++         * owning NTFS handle performs the resize and sync before verification. */
++        defer_truncate = wim->filename && android_proxy_fd(wim->filename) >= 0;
++#endif
++		if (!defer_truncate && ftruncate(wim->out_fd.fd, wim->out_fd.offset) &&
+@@ -3365,0 +3381,6 @@
 +#ifdef __ANDROID__
 +    /* A virtual descriptor has no writable parent directory. Never stage or
 +     * rebuild a full WIM elsewhere when its representation requires rebuild. */

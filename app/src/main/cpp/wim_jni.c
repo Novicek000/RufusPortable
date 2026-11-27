@@ -1,3 +1,4 @@
+#include "config.h"
 #include <jni.h>
 #include <errno.h>
 #include <limits.h>
@@ -5,7 +6,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <wimlib.h>
+#include "wimlib/wim.h"
 #include "unattend.h"
+
+#define METADATA_FIELDS 6
+_Static_assert(sizeof(off_t)==8,"WIM JNI requires 64-bit file offsets");
 
 static pthread_once_t initialization = PTHREAD_ONCE_INIT;
 static int initialization_error;
@@ -51,14 +56,14 @@ JNIEXPORT jobjectArray JNICALL Java_pl_rufusportable_WimMetadata_inspect(
     }
     struct wimlib_wim_info info;
     result = wimlib_get_wim_info(wim, &info);
-    if (result || info.image_count > INT_MAX / 5) {
+    if (result || info.image_count > INT_MAX / METADATA_FIELDS) {
         throw_error(env, result ? wimlib_get_error_string(result) : "Too many WIM images");
         wimlib_free(wim);
         return NULL;
     }
     jclass byte_array = (*env)->FindClass(env, "[B");
     jobjectArray values = byte_array ?
-            (*env)->NewObjectArray(env, info.image_count * 5, byte_array, NULL) : NULL;
+            (*env)->NewObjectArray(env, info.image_count * METADATA_FIELDS, byte_array, NULL) : NULL;
     if (byte_array)
         (*env)->DeleteLocalRef(env, byte_array);
     if (values) {
@@ -68,9 +73,10 @@ JNIEXPORT jobjectArray JNICALL Java_pl_rufusportable_WimMetadata_inspect(
                 wimlib_get_image_description(wim, index),
                 wimlib_get_image_property(wim, index, "WINDOWS/ARCH"),
                 wimlib_get_image_property(wim, index, "WINDOWS/EDITIONID"),
-                wimlib_get_image_property(wim, index, "WINDOWS/VERSION/BUILD")
+                wimlib_get_image_property(wim, index, "WINDOWS/VERSION/BUILD"),
+                wimlib_get_image_property(wim, index, "WINDOWS/LANGUAGES/LANGUAGE")
             };
-            for (int field = 0; field < 5; field++) {
+            for (int field = 0; field < METADATA_FIELDS; field++) {
                 const char *text = properties[field] ? properties[field] : "";
                 size_t length = strlen(text);
                 if (length > INT_MAX) {
@@ -82,7 +88,7 @@ JNIEXPORT jobjectArray JNICALL Java_pl_rufusportable_WimMetadata_inspect(
                     break;
                 (*env)->SetByteArrayRegion(env, bytes, 0, length, (const jbyte *)text);
                 if (!(*env)->ExceptionCheck(env))
-                    (*env)->SetObjectArrayElement(env, values, (index - 1) * 5 + field, bytes);
+                    (*env)->SetObjectArrayElement(env, values, (index - 1) * METADATA_FIELDS + field, bytes);
                 (*env)->DeleteLocalRef(env, bytes);
                 if ((*env)->ExceptionCheck(env))
                     break;
@@ -108,20 +114,21 @@ static char *utf8_path(JNIEnv *env, jbyteArray array)
     return path;
 }
 
-JNIEXPORT void JNICALL Java_pl_rufusportable_WimMetadata_update(
+JNIEXPORT jlong JNICALL Java_pl_rufusportable_WimMetadata_update(
         JNIEnv *env,jclass type,jstring filename,jint image,jbyteArray source,jbyteArray target)
 {
     (void)type;
     pthread_once(&initialization,initialize_wim);
-    if(initialization_error) {throw_error(env,wimlib_get_error_string(initialization_error));return;}
-    if(!filename || image<1) {throw_error(env,"Invalid WIM update");return;}
+    if(initialization_error) {throw_error(env,wimlib_get_error_string(initialization_error));return -1;}
+    if(!filename || image<1) {throw_error(env,"Invalid WIM update");return -1;}
     char *source_path=utf8_path(env,source);
-    if(!source_path) return;
+    if(!source_path) return -1;
     char *target_path=utf8_path(env,target);
-    if(!target_path) {free(source_path);return;}
+    if(!target_path) {free(source_path);return -1;}
     const char *path=(*env)->GetStringUTFChars(env,filename,NULL);
     WIMStruct *wim=NULL;
     int result=0;
+    jlong final_size=-1;
     if(path) {
         result=wimlib_open_wim(path,WIMLIB_OPEN_FLAG_WRITE_ACCESS,&wim);
         (*env)->ReleaseStringUTFChars(env,filename,path);
@@ -131,12 +138,14 @@ JNIEXPORT void JNICALL Java_pl_rufusportable_WimMetadata_update(
             command.add.fs_source_path=source_path;
             command.add.wim_target_path=target_path;
             result=wimlib_update_image(wim,image,&command,1,0);
-            if(!result) result=wimlib_overwrite(wim,WIMLIB_WRITE_FLAG_FSYNC,1);
+            if(!result) result=wimlib_overwrite(wim,WIMLIB_WRITE_FLAG_FSYNC|WIMLIB_WRITE_FLAG_UNSAFE_COMPACT,1);
+            if(!result) final_size=wim->out_fd.offset;
         }
     }
     wimlib_free(wim);
     free(source_path);free(target_path);
     if(result) throw_error(env,wimlib_get_error_string(result));
+    return final_size;
 }
 
 JNIEXPORT void JNICALL Java_pl_rufusportable_WimMetadata_extract(
@@ -209,6 +218,28 @@ JNIEXPORT void JNICALL Java_pl_rufusportable_WimMetadata_verifyWim(
     int result=wimlib_open_wim(path,0,&wim);
     (*env)->ReleaseStringUTFChars(env,filename,path);
     if(!result)result=wimlib_verify_wim(wim,0);
+    wimlib_free(wim);
+    if(result)throw_error(env,wimlib_get_error_string(result));
+}
+
+JNIEXPORT void JNICALL Java_pl_rufusportable_WimMetadata_requireEditable(
+        JNIEnv *env,jclass type,jstring filename)
+{
+    (void)type;
+    pthread_once(&initialization,initialize_wim);
+    if(initialization_error) {throw_error(env,wimlib_get_error_string(initialization_error));return;}
+    if(!filename) {throw_error(env,"Missing WIM source");return;}
+    const char *path=(*env)->GetStringUTFChars(env,filename,NULL);
+    if(!path)return;
+    WIMStruct *wim=NULL;
+    int result=wimlib_open_wim(path,0,&wim);
+    (*env)->ReleaseStringUTFChars(env,filename,path);
+    if(!result) {
+        struct wimlib_wim_info info;
+        result=wimlib_get_wim_info(wim,&info);
+        if(!result && (info.pipable || info.total_parts!=1 || info.is_marked_readonly || info.write_in_progress))
+            throw_error(env,"Ten boot.wim nie pozwala na bezpośrednią personalizację. Wybierz standardową instalację bez zmian WIM.");
+    }
     wimlib_free(wim);
     if(result)throw_error(env,wimlib_get_error_string(result));
 }

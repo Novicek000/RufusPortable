@@ -92,6 +92,70 @@ public class StartScreenTest {
             assertEquals(4,((android.widget.Spinner)dialogRoot.findViewById(caption.getLabelFor())).getSelectedItemPosition());
         }
     }
+    private void windowsProfile(MainActivity activity) throws Exception {
+        byte[][] values={"Windows Setup".getBytes(java.nio.charset.StandardCharsets.UTF_8),new byte[0],
+                "9".getBytes(java.nio.charset.StandardCharsets.UTF_8),new byte[0],
+                "26100".getBytes(java.nio.charset.StandardCharsets.UTF_8),"en-US".getBytes(java.nio.charset.StandardCharsets.UTF_8)};
+        Class<?> type=Class.forName("pl.rufusportable.MainActivity$WindowsProfile");
+        var constructor=type.getDeclaredConstructor(java.util.List.class,int.class,WimMetadata.Image.class);
+        constructor.setAccessible(true);
+        Object profile=constructor.newInstance(java.util.Collections.emptyList(),2,new WimMetadata.Image(2,values,0));
+        var field=MainActivity.class.getDeclaredField("windowsProfile");field.setAccessible(true);field.set(activity,profile);
+        var timezone=MainActivity.class.getDeclaredField("windowsTimezone");timezone.setAccessible(true);timezone.set(activity,"UTC");
+    }
+    private androidx.appcompat.app.AlertDialog windowsDialog(MainActivity activity) throws Exception {
+        var show=MainActivity.class.getDeclaredMethod("showWindowsOptions",Runnable.class);show.setAccessible(true);show.invoke(activity,(Object)null);
+        return (androidx.appcompat.app.AlertDialog)org.robolectric.shadows.ShadowDialog.getLatestDialog();
+    }
+    @Test public void windowsOptionsValidateAccountsAndPersistAcrossRecreation() throws Exception {
+        Shadows.shadowOf(RuntimeEnvironment.getApplication()).grantPermissions(
+                "pl.rufusportable.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION");
+        try(var controller=Robolectric.buildActivity(MainActivity.class).setup()) {
+            windowsProfile(controller.get());
+            androidx.appcompat.app.AlertDialog dialog=windowsDialog(controller.get());
+            View root=dialog.getWindow().getDecorView();
+            ((android.widget.CheckBox)find(root,"Utwórz konto lokalne")).setChecked(true);
+            TextView nameCaption=(TextView)find(root,"Nazwa konta lokalnego");
+            android.widget.EditText account=root.findViewById(nameCaption.getLabelFor());
+            account.setText("Administrator");dialog.getButton(-1).performClick();
+            assertNotNull(account.getError());assertTrue(dialog.isShowing());
+            account.setText("żółć/Jan");
+            ((android.widget.CheckBox)find(root,"Nie wymagaj konta Microsoft")).setChecked(true);
+            ((android.widget.CheckBox)find(root,"Ustaw język, region i strefę czasową")).setChecked(true);
+            TextView regionCaption=(TextView)find(root,"Język i region (np. pl-PL)");
+            ((android.widget.EditText)root.findViewById(regionCaption.getLabelFor())).setText("pl-PL");
+            dialog.getButton(-1).performClick();assertFalse(dialog.isShowing());
+            controller.recreate();windowsProfile(controller.get());dialog=windowsDialog(controller.get());
+            root=dialog.getWindow().getDecorView();
+            assertTrue(((android.widget.CheckBox)find(root,"Utwórz konto lokalne")).isChecked());
+            assertTrue(((android.widget.CheckBox)find(root,"Nie wymagaj konta Microsoft")).isChecked());
+            nameCaption=(TextView)find(root,"Nazwa konta lokalnego");
+            assertEquals("żółć_Jan",((android.widget.EditText)root.findViewById(nameCaption.getLabelFor())).getText().toString());
+            regionCaption=(TextView)find(root,"Język i region (np. pl-PL)");
+            assertEquals("pl-PL",((android.widget.EditText)root.findViewById(regionCaption.getLabelFor())).getText().toString());
+        }
+    }
+    @Test public void existingOemAnswerSkipsCustomizationControls() throws Exception {
+        Shadows.shadowOf(RuntimeEnvironment.getApplication()).grantPermissions(
+                "pl.rufusportable.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION");
+        try(var controller=Robolectric.buildActivity(MainActivity.class).setup()) {
+            Class<?> profileType=Class.forName("pl.rufusportable.MainActivity$WindowsProfile");
+            var constructor=profileType.getDeclaredConstructor(java.util.List.class);constructor.setAccessible(true);
+            var profile=MainActivity.class.getDeclaredField("windowsProfile");profile.setAccessible(true);
+            profile.set(controller.get(),constructor.newInstance(java.util.Collections.singletonList(
+                    new IsoTree.Entry("sources/$OEM$/$$/Panther/unattend.xml",false,0,10))));
+            var dialog=windowsDialog(controller.get());
+            assertEquals("Zamknij",dialog.getButton(-1).getText().toString());
+            assertNull(find(dialog.getWindow().getDecorView(),"Utwórz konto lokalne"));
+        }
+    }
+    @Test public void windowsTimezoneDataMapsAndroidIanaZones() throws Exception {
+        WindowsTimeZones zones=new WindowsTimeZones(RuntimeEnvironment.getApplication().getAssets().open("windows/timezones.properties"));
+        assertEquals("Central European Standard Time",zones.windowsZone("Europe/Warsaw"));
+        assertEquals("Pacific Standard Time",zones.windowsZone("America/Los_Angeles"));
+        assertEquals("UTC",zones.windowsZone(null));
+        assertTrue(zones.windows.contains("UTC"));
+    }
     @Test public void startsWithWriteDisabledAndOpensDocumentPicker() {
         // Android grants the app its own manifest-declared signature permission at install.
         Shadows.shadowOf(RuntimeEnvironment.getApplication()).grantPermissions(

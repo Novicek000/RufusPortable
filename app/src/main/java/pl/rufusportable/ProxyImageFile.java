@@ -7,12 +7,15 @@ import android.system.*;
 import java.io.*;
 import java.nio.*;
 import java.nio.channels.FileChannel;
+import java.util.concurrent.*;
 
 /** A seekable view of one ISO/UDF file, exposed to native code through Android AppFuse. */
 final class ProxyImageFile implements Closeable {
     private final FileInputStream source;
     private final HandlerThread thread;
     private final ParcelFileDescriptor proxy;
+    private final Handler handler;
+    private final CountDownLatch released=new CountDownLatch(1);
     private volatile IOException readFailure;
 
     ProxyImageFile(Context context, ImageFile image, IsoTree.Entry entry) throws IOException {
@@ -25,6 +28,7 @@ final class ProxyImageFile implements Closeable {
         Thread owner = Thread.currentThread();
         thread = new HandlerThread("rufus-image-reader");
         thread.start();
+        handler=new Handler(thread.getLooper());
         try {
             StorageManager storage = (StorageManager)context.getSystemService(Context.STORAGE_SERVICE);
             proxy = storage.openProxyFileDescriptor(ParcelFileDescriptor.MODE_READ_ONLY,
@@ -87,10 +91,12 @@ final class ProxyImageFile implements Closeable {
                             try {
                                 source.close();
                             } catch (IOException error) {
-                                readFailure = error;
+                                if(readFailure==null)readFailure=error;
+                            } finally {
+                                released.countDown();thread.quitSafely();
                             }
                         }
-                    }, new Handler(thread.getLooper()));
+                    }, handler);
         } catch (IOException | RuntimeException error) {
             thread.quitSafely();
             try {
@@ -112,20 +118,14 @@ final class ProxyImageFile implements Closeable {
 
     @Override
     public void close() throws IOException {
-        IOException failure = null;
-        try {
-            proxy.close();
-        } catch (IOException error) {
-            failure = error;
-        } finally {
-            thread.quitSafely();
-        }
-        try {
-            source.close();
-        } catch (IOException error) {
-            if (failure == null) failure = error;
-            else failure.addSuppressed(error);
-        }
-        if (failure != null) throw failure;
+        IOException failure=null;
+        // FUSE_RELEASE must run before the handler quits: Android releases its
+        // per-thread read/write buffers only after the onRelease callback.
+        handler.postDelayed(thread::quitSafely,5000);
+        try {source.close();}catch(IOException error){failure=error;}
+        try {proxy.close();}catch(IOException error){if(failure==null)failure=error;else failure.addSuppressed(error);}
+        try {if(Thread.currentThread()!=thread)released.await(2,TimeUnit.SECONDS);}
+        catch(InterruptedException cancelled){Thread.currentThread().interrupt();}
+        if(failure!=null)throw failure;
     }
 }

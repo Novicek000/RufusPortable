@@ -24,8 +24,8 @@ Celem jest zgodność funkcjonalna z Rufusem z rewizji 8337c3e7e534b5d5b5045dd8e
 | Funkcja oryginału | Stan |
 | --- | --- |
 | Standardowy instalator Windows wypakowany na NTFS | Ścieżka jest podłączona w aplikacji, pliki kopiowane i weryfikowane po ponownym montowaniu; WinPE uruchomiony w QEMU, pełna instalacja do sprawdzenia |
-| Windows To Go | Do implementacji operacji WIM, boot configuration i partycji ESP/MSR |
-| Personalizacja instalatora Windows i unattended XML | Natywny generator wue.c zgodny w teście różnicowym; modyfikacja WIM na NTFS działa w Androidzie; podłączenie opcji instalatora w toku |
+| Windows To Go | Do implementacji aplikowania WIM na NTFS, konfiguracji BCD oraz partycji ESP/MSR |
+| Personalizacja instalatora Windows i unattended XML | Konto, prywatność, region, BitLocker, wymagania Windows 11 i QoL podłączone do zapisu; silent install, CA 2023 i SkuSiPolicy oraz instalacja systemu do uzupełnienia |
 | FreeDOS | Podstawowy start BIOS sprawdzony w QEMU |
 | MS-DOS | Do implementacji wraz z odpowiednim źródłem plików systemowych |
 | Syslinux 4/6, GRUB2, Grub4DOS, ReactOS | Do implementacji |
@@ -109,10 +109,22 @@ Opcje pozwalają wybrać zestaw przebiegów i wykrywanie fałszywej pojemności.
 
 ## Modyfikowanie WIM na nośniku docelowym
 
-NTFS udostępnia teraz losowy odczyt/zapis istniejącego pliku, jego rozmiar, zmianę długości i synchronizację. Testy JNI obejmują rozszerzenie, obcięcie, zerowanie rozszerzonych zakresów, błędy synchronizacji i zamknięcie wraz z woluminem. Zawartość sprawdził niezależny ntfscat. `ProxyNtfsFile` udostępnia taki plik jako zapisywalny deskryptor AppFuse. Poprawki wimlib duplikują deskryptor, weryfikują jego uprawnienia i pozwalają aktualizować WIM przez dopisanie zasobów. Dla formatów wymagających przebudowy biblioteka zwraca błąd zamiast tworzyć pełną kopię WIM poza nośnikiem.
+NTFS udostępnia teraz losowy odczyt/zapis istniejącego pliku, jego rozmiar, zmianę długości i synchronizację. Testy JNI obejmują rozszerzenie, obcięcie, zerowanie rozszerzonych zakresów, błędy synchronizacji i zamknięcie wraz z woluminem. Zawartość sprawdził niezależny ntfscat. `ProxyNtfsFile` udostępnia taki plik jako zapisywalny deskryptor AppFuse. Poprawki wimlib duplikują deskryptor i weryfikują jego uprawnienia. Początkowy tryb dopisywania zasobów został zastąpiony opisaną poniżej przebudową w miejscu, zgodną z Rufusem. Dla formatów wymagających przebudowy biblioteka zwraca błąd zamiast tworzyć pełną kopię WIM poza nośnikiem.
 
 JNI dodaje wskazany plik do wybranego indeksu WIM, wypakowuje plik i weryfikuje integralność zasobów. Test hosta wykrywa uszkodzenie danych wewnątrz WIM. Cztery testy instrumentacyjne API 26 / x86 przeszły: odczyt fragmentów źródła, błąd źródła, wygenerowanie odpowiedzi instalatora i aktualizacja WIM w natywnym NTFS z odczytem po ponownym montowaniu oraz błąd synchronizacji nośnika. Nie wykonano jeszcze instalacji Windows z tą personalizacją.
 
 Generator `unattend.c` przenosi funkcję CreateUnattendXml z przypiętego wue.c. Odczyty ustawień Windows zastępują jawne parametry, a wynik powstaje w pamięci. `test-unattend-reference.sh` kompiluje niezmienioną funkcję referencyjną z kontrolowanymi wejściami systemowymi i porównuje wyniki dla 32 768 kombinacji architektury/flag. Wyniki są identyczne. Testy Java dodatkowo sprawdzają strukturę XML, konta, Unicode, regionalizację i nieprawidłowe parametry.
 
 Podmoduł `third_party/rufus` przypina pełne źródło referencyjne do 8337c3e7e534b5d5b5045dd8ecb9a7ea60e9232c. Oryginalne podpisane wrappery setup_x64.exe i setup_arm64.exe wyodrębniono z oficjalnego Rufusa v4.16 po rozpakowaniu UPX. Ich SHA-256 są identyczne z wartościami podanymi w res/setup/readme.txt źródła referencyjnego. Skrypt `extract-rufus-setup.py` umożliwia powtórzenie ekstrakcji i sprawdza te sumy. Wrappery mają zostać podłączone do personalizacji nośnika; samo dołączenie zasobów nie jest jej zakończeniem.
+
+## Personalizacja w ścieżce zapisu Androida
+
+Aplikacja odczytuje profil źródłowego boot.wim i pokazuje opcje konta lokalnego, konta Microsoft, prywatności, regionu, BitLockera, wymagań Windows 11 i usprawnień Rufusa. Zachowuje ustawienia po odtworzeniu Activity. Wykorzystuje mapowanie stref czasowych Unicode CLDR 47, z licencją w assets/windows. Dla obrazu zawierającego własny sources/$OEM$/$$/Panther/unattend.xml używa dostarczonej konfiguracji, tak jak oryginał.
+
+`WindowsCustomization` przed formatowaniem planuje dodatkowy plik OEM albo zmianę boot.wim. Przy pomijaniu wymagań zachowuje appraiserres.dll jako appraiserres.bak, tworzy pusty zamiennik i dla Windows 11 24H2+ zachowuje oryginalny setup.exe jako setup.dll oraz dodaje oryginalny wrapper odpowiedniej architektury. Pliki planu przechodzą zwykłe kopiowanie i weryfikację NTFS. Wariant z windowsPE dodaje odpowiedź do odpowiedniego indeksu boot.wim bez jego kopiowania na telefon. Po ponownym montowaniu sprawdza zasoby WIM i treść pliku odpowiedzi. W telefonie powstają tylko mały wygenerowany XML i jego kontrolny odczyt, usuwane po operacji.
+
+Aktualizacja WIM korzysta z WIMLIB_WRITE_FLAG_UNSAFE_COMPACT jak ApplyWindowsCustomization w Rufusie, aby ograniczyć fragmentację istotną dla niektórych firmware. AppFuse nie udostępnia truncate: JNI zwraca końcową długość z out_fd, a właściciel pliku NTFS wykonuje zmianę długości i synchronizację. Warstwa JNI używa tych samych 64-bitowych offsetów co wimlib; zgodność wymusza asercja kompilacji. Test 32-bitowego Androida wykrył i pozwolił poprawić wcześniejszą różnicę ustawień. Pliki pipable, podzielone i oznaczone jako tylko do odczytu są odrzucane przed zapisem w trybie wymagającym tej modyfikacji.
+
+51 testów Java, lint i budowanie APK przeszły. Sześć testów na emulatorze API 26 / x86 obejmuje modyfikację i integralność WIM, błąd synchronizacji, źródło powyżej 4 GiB, NTFS na rzadkim nośniku 64 GiB z rzeczywistymi operacjami powyżej 4 GiB oraz interfejs otwierający własny testowy ISO i wybierający ustawienia przez dostępność Androida. Testowy ISO nie zawiera Windows i nie potwierdza rozruchu ani instalacji systemu. Próba instalacji z personalizacją pozostaje do wykonania.
+
+[CI 46036252453](https://github.com/Novicek000/RufusPortable/actions/runs/46036252453) potwierdziło wcześniejszą rewizję 0d91d43 na API 26 i 35, po cztery testy instrumentacyjne. Późniejsza integracja dialogu i przebudowa w miejscu mają oddzielną weryfikację opisaną powyżej; nowy przebieg CI będzie odnosił się do nowego commita.
