@@ -128,3 +128,9 @@ Aktualizacja WIM korzysta z WIMLIB_WRITE_FLAG_UNSAFE_COMPACT jak ApplyWindowsCus
 51 testów Java, lint i budowanie APK przeszły. Sześć testów na emulatorze API 26 / x86 obejmuje modyfikację i integralność WIM, błąd synchronizacji, źródło powyżej 4 GiB, NTFS na rzadkim nośniku 64 GiB z rzeczywistymi operacjami powyżej 4 GiB oraz interfejs otwierający własny testowy ISO i wybierający ustawienia przez dostępność Androida. Testowy ISO nie zawiera Windows i nie potwierdza rozruchu ani instalacji systemu. Próba instalacji z personalizacją pozostaje do wykonania.
 
 [CI 46036252453](https://github.com/Novicek000/RufusPortable/actions/runs/46036252453) potwierdziło wcześniejszą rewizję 0d91d43 na API 26 i 35, po cztery testy instrumentacyjne. Późniejsza integracja dialogu i przebudowa w miejscu mają oddzielną weryfikację opisaną powyżej; nowy przebieg CI będzie odnosił się do nowego commita.
+
+## Odzyskiwanie transportu Bulk-Only
+
+Obsługa USB wykonuje reset klasy Bulk-Only i czyści halt obu endpointów po błędzie transportu. Ponawia komendę najwyżej raz. REQUEST SENSE rozróżnia ochronę zapisu, brak nośnika, błędy sprzętu oraz przejściowe Unit Attention i Aborted Command. Krótkie odpowiedzi sense i READ CAPACITY(16) są akceptowane tylko z poprawnym residue i wymaganymi polami. Alternatywny interfejs Bulk-Only jest aktywowany przed komendami; nie stanowi to implementacji UAS. 58 testów Java i lint przeszły, w tym przerwany zapis, błędna faza, nieudany reset i ograniczenie ponowień. Testy transportu używają emulowanego urządzenia, próby fizycznych awarii pozostają do wykonania.
+
+[CI 46043061271](https://github.com/Novicek000/RufusPortable/actions/runs/46043061271) potwierdziło personalizację z rewizji 902e5f5: po sześć testów instrumentacyjnych na API 26 i 35, budowanie czterech ABI, 51 testów Java, lint i testy natywne, w tym 32 768 porównań generatora z oryginałem.

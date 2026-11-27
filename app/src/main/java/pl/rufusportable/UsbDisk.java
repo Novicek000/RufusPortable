@@ -33,11 +33,17 @@ final class UsbDisk implements Closeable {
         try {
             if (iface==null || !(claimed=connection.claimInterface(iface,true)))
                 throw new IOException("Nośnik jest zajęty.");
+            selectAlternate(connection,iface);
             return maxLun(connection,iface)+1;
         } finally {
             if (claimed) connection.releaseInterface(iface);
             connection.close();
         }
+    }
+
+    private static void selectAlternate(UsbDeviceConnection connection,UsbInterface iface) throws IOException {
+        if(iface.getAlternateSetting()!=0 && !connection.setInterface(iface))
+            throw new IOException("Nie można włączyć trybu Bulk-Only tego nośnika USB.");
     }
 
     private static int maxLun(UsbDeviceConnection connection,UsbInterface iface) throws IOException {
@@ -62,6 +68,7 @@ final class UsbDisk implements Closeable {
         if (connection == null) throw new IOException("Brak dostępu do USB.");
         try {
             if (iface == null || !connection.claimInterface(iface, true)) throw new IOException("Nośnik jest zajęty.");
+            selectAlternate(connection,iface);
             for (int i = 0; i < iface.getEndpointCount(); i++) {
                 UsbEndpoint e = iface.getEndpoint(i);
                 if (e.getType() != UsbConstants.USB_ENDPOINT_XFER_BULK) continue;
@@ -74,12 +81,7 @@ final class UsbDisk implements Closeable {
             byte[] geometry = new byte[8];
             byte[] readCapacity = new byte[10];
             readCapacity[0] = 0x25;
-            try {
-                command(readCapacity, geometry, 8, true);
-            } catch (ScsiError e) {
-                command(new byte[]{3, 0, 0, 0, 18, 0}, new byte[18], 18, true);
-                command(readCapacity, geometry, 8, true);
-            }
+            command(readCapacity, geometry, 8, true);
             ByteBuffer info = ByteBuffer.wrap(geometry);
             long last = Integer.toUnsignedLong(info.getInt());
             int sector = info.getInt();
@@ -106,10 +108,63 @@ final class UsbDisk implements Closeable {
     }
 
     private static final class ScsiError extends IOException {
-        ScsiError() { super("Nośnik odrzucił polecenie. Sprawdź ochronę zapisu i połączenie."); }
+        int key=-1,asc=-1;
+        ScsiError() {super("Nośnik odrzucił polecenie USB.");}
+        void decode(byte[] sense,int length) {
+            int response=sense[0]&0x7f;
+            if((response==0x70 || response==0x71) && length>=3) {
+                key=sense[2]&15;if(length>=14)asc=sense[12]&255;
+            } else if((response==0x72 || response==0x73) && length>=4) {
+                key=sense[1]&15;asc=sense[2]&255;
+            }
+        }
+        boolean transientFailure(){return key==6 || key==11;}
+        @Override public String getMessage() {
+            if(key==7)return "Nośnik jest zabezpieczony przed zapisem.";
+            if(key==2 && asc==0x3a)return "Wybrana jednostka USB nie ma nośnika. Włóż kartę i wybierz ją ponownie.";
+            if(key==2)return "Nośnik nie jest gotowy. Poczekaj i wybierz go ponownie.";
+            if(key==3 || key==4)return "Nośnik zgłosił błąd danych lub sprzętu.";
+            return super.getMessage();
+        }
     }
 
-    private synchronized void command(byte[] cdb, byte[] data, int count, boolean reading) throws IOException {
+    private synchronized void command(byte[] cdb,byte[] data,int count,boolean reading) throws IOException {
+        if(cdb.length<1 || cdb.length>16 || count<0 || count>data.length)
+            throw new IOException("Nieprawidłowe polecenie USB.");
+        IOException previous=null;
+        for(int attempt=0;attempt<2;attempt++) {
+            try {commandOnce(cdb,data,count,reading);return;}
+            catch(ScsiError failed) {
+                byte[] sense=new byte[18];
+                try {int length=commandOnce(new byte[]{3,0,0,0,18,0},sense,18,true);failed.decode(sense,length);}
+                catch(IOException detail) {
+                    failed.addSuppressed(detail);
+                    if(!(detail instanceof ScsiError))recover(failed);
+                }
+                if(attempt==0 && failed.transientFailure()){previous=failed;continue;}
+                if(previous!=null)failed.addSuppressed(previous);
+                throw failed;
+            } catch(IOException failed) {
+                boolean recovered=recover(failed);
+                if(attempt==0 && recovered){previous=failed;continue;}
+                if(previous!=null)failed.addSuppressed(previous);
+                throw failed;
+            }
+        }
+    }
+
+    private boolean recover(IOException failed) {
+        boolean success=true;
+        // USB Mass Storage Bulk-Only reset recovery, in the order required by
+        // the transport specification: class reset, then both endpoint halts.
+        if(connection.controlTransfer(0x21,0xff,0,iface.getId(),new byte[0],0,5000)<0)success=false;
+        if(connection.controlTransfer(0x02,1,0,in.getAddress(),new byte[0],0,5000)<0)success=false;
+        if(connection.controlTransfer(0x02,1,0,out.getAddress(),new byte[0],0,5000)<0)success=false;
+        if(!success)failed.addSuppressed(new IOException("Nie udało się przywrócić transportu USB po błędzie."));
+        return success;
+    }
+
+    private int commandOnce(byte[] cdb,byte[] data,int count,boolean reading) throws IOException {
         ByteBuffer wrapper = ByteBuffer.allocate(31).order(ByteOrder.LITTLE_ENDIAN);
         wrapper.putInt(0x43425355).putInt(++tag).putInt(count).put((byte)(reading ? 128 : 0))
                 .put((byte)lun).put((byte)cdb.length).put(cdb);
@@ -125,10 +180,13 @@ final class UsbDisk implements Closeable {
         ByteBuffer status = ByteBuffer.allocate(13).order(ByteOrder.LITTLE_ENDIAN);
         if (transfer(in, status.array(), 0, 13) != 13 || status.getInt() != 0x53425355 || status.getInt() != tag)
             throw new IOException("Niepoprawne potwierdzenie USB.");
-        int residue = status.getInt();
-        byte result = status.get();
-        if (result == 1) throw new ScsiError();
-        if (result != 0 || residue != 0 || position != count) throw new IOException("Niepełna transmisja USB.");
+        long residue=Integer.toUnsignedLong(status.getInt());
+        int result=status.get()&255;
+        if(result==1)throw new ScsiError();
+        boolean shortAllowed=reading && ((cdb[0]&255)==3 || ((cdb[0]&255)==0x9e && (cdb[1]&0x1f)==0x10 && position>=12));
+        if(result!=0 || residue!=count-position || (!shortAllowed && position!=count))
+            throw new IOException("Niepełna transmisja USB.");
+        return position;
     }
 
     private int transfer(UsbEndpoint endpoint, byte[] data, int offset, int count) {

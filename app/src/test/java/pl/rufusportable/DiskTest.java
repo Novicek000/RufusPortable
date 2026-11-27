@@ -19,6 +19,10 @@ public class DiskTest {
     private UsbDevice device;
     private UsbDeviceConnection link;
     private int maximumLun, selectedLun;
+    private UsbInterface face;
+    private int resets,writePackets,stallWritePacket=-1,scsiFailures,senseKey=7,senseAsc,cswResidue;
+    private boolean transportStalled,alwaysStalled,phaseError,commandFailed,shortSense,shortCapacity;
+    private final List<Integer> clearedEndpoints=new ArrayList<>();
     private final List<Integer> commands=new ArrayList<>();
     private boolean corrupt;
     private UsbDisk disk;
@@ -26,7 +30,7 @@ public class DiskTest {
     @Before public void setup() throws Exception {
         manager = mock(UsbManager.class);
         device = mock(UsbDevice.class);
-        UsbInterface face = mock(UsbInterface.class);
+        face = mock(UsbInterface.class);
         link = mock(UsbDeviceConnection.class);
         UsbEndpoint in = mock(UsbEndpoint.class), out = mock(UsbEndpoint.class);
         when(device.getInterfaceCount()).thenReturn(1);
@@ -40,11 +44,18 @@ public class DiskTest {
         when(in.getType()).thenReturn(2);
         when(out.getType()).thenReturn(2);
         when(in.getDirection()).thenReturn(128);
+        when(in.getAddress()).thenReturn(0x81);when(out.getAddress()).thenReturn(0x02);
+        when(link.setInterface(face)).thenReturn(true);
         when(manager.openDevice(device)).thenReturn(link);
         when(link.claimInterface(face,true)).thenReturn(true);
         when(link.controlTransfer(eq(0xa1),eq(0xfe),eq(0),eq(0),any(),eq(1),eq(5000)))
                 .thenAnswer(call->{byte[] response=call.getArgument(4);response[0]=(byte)maximumLun;return 1;});
+        when(link.controlTransfer(eq(0x21),eq(0xff),eq(0),eq(0),any(),eq(0),eq(5000)))
+                .thenAnswer(call->{resets++;transportStalled=false;remaining=0;cswResidue=0;return 0;});
+        when(link.controlTransfer(eq(0x02),eq(1),eq(0),anyInt(),any(),eq(0),eq(5000)))
+                .thenAnswer(call->{clearedEndpoints.add(call.getArgument(3));return 0;});
         when(link.bulkTransfer(any(),any(),anyInt(),anyInt(),anyInt())).thenAnswer(call -> {
+            if(transportStalled || alwaysStalled)return -1;
             UsbEndpoint endpoint = call.getArgument(0);
             byte[] payload = call.getArgument(1);
             int offset = call.getArgument(2), count = call.getArgument(3);
@@ -54,6 +65,9 @@ public class DiskTest {
                 assertEquals(0x43425355,b.getInt());
                 assertEquals(selectedLun,payload[13]);
                 tag=b.getInt(); remaining=b.getInt(); op=payload[15]&255; commands.add(op);
+                commandFailed=op!=3 && scsiFailures>0;
+                if(commandFailed)scsiFailures--;
+                cswResidue=0;
                 if (op==0x28 || op==0x2a || op==0x88 || op==0x8a) {
                     b.order(ByteOrder.BIG_ENDIAN);
                     boolean extended=op==0x88 || op==0x8a;
@@ -67,8 +81,22 @@ public class DiskTest {
                     assertEquals(32,b.order(ByteOrder.BIG_ENDIAN).getInt(25));
                 }
             } else if (remaining>0) {
-                if (op==0x25) b.order(ByteOrder.BIG_ENDIAN).putInt((int)(lastLba<0?0xffffffffL:Math.min(0xffffffffL,lastLba))).putInt(512);
-                else if (op==0x9e) b.order(ByteOrder.BIG_ENDIAN).putLong(lastLba).putInt(512);
+                if((op==0x2a || op==0x8a) && ++writePackets==stallWritePacket) {
+                    transportStalled=true;stallWritePacket=-1;return -1;
+                }
+                if(op==3) {
+                    payload[offset]=(byte)(shortSense?0x72:0x70);
+                    if(shortSense) {
+                        payload[offset+1]=(byte)senseKey;payload[offset+2]=(byte)senseAsc;
+                        cswResidue=remaining-8;remaining=0;return 8;
+                    }
+                    payload[offset+2]=(byte)senseKey;payload[offset+7]=10;payload[offset+12]=(byte)senseAsc;
+                } else if(commandFailed) { /* failed command consumes data but does not change media */ }
+                else if (op==0x25) b.order(ByteOrder.BIG_ENDIAN).putInt((int)(lastLba<0?0xffffffffL:Math.min(0xffffffffL,lastLba))).putInt(512);
+                else if (op==0x9e) {
+                    b.order(ByteOrder.BIG_ENDIAN).putLong(lastLba).putInt(512);
+                    if(shortCapacity){cswResidue=remaining-12;remaining=0;return 12;}
+                }
                 else if (op==0x2a || op==0x8a) System.arraycopy(payload,offset,storage,Math.toIntExact(cursor-windowStart),count);
                 else if (op==0x28 || op==0x88) {
                     System.arraycopy(storage,Math.toIntExact(cursor-windowStart),payload,offset,count);
@@ -77,7 +105,9 @@ public class DiskTest {
                 cursor+=count; remaining-=count;
             } else {
                 assertEquals(13,count);
-                b.putInt(0x53425355).putInt(tag).putInt(0).put((byte)0);
+                int result=commandFailed?1:phaseError?2:0;
+                if(phaseError){phaseError=false;transportStalled=true;}
+                b.putInt(0x53425355).putInt(tag).putInt(cswResidue).put((byte)result);
             }
             return count;
         });
@@ -185,6 +215,61 @@ public class DiskTest {
         when(link.controlTransfer(eq(0xa1),eq(0xfe),eq(0),eq(0),any(),eq(1),eq(5000))).thenReturn(-1);
         assertEquals(1,UsbDisk.logicalUnits(manager,device));
         assertThrows(IOException.class,()->new UsbDisk(manager,device,1));
+    }
+    @Test public void partialWriteStallResetsTransportAndRetriesWithoutChangingNeighbours() throws Exception {
+        Arrays.fill(storage,(byte)87);stallWritePacket=2;
+        byte[] bytes=new byte[40000];new Random(23).nextBytes(bytes);
+        BlockDevice partition=disk.partition(0,storage.length);
+        partition.write(0,bytes);
+        byte[] read=new byte[bytes.length];partition.read(0,read);
+        assertArrayEquals(bytes,read);assertEquals(87,storage[bytes.length]);
+        assertEquals(1,resets);assertEquals(Arrays.asList(0x81,0x02),clearedEndpoints);
+    }
+    @Test public void phaseErrorRecoversAndRepeatedTransportFailureIsBounded() throws Exception {
+        phaseError=true;
+        disk.partition(0,storage.length).write(0,new byte[512]);
+        assertEquals(1,resets);
+        alwaysStalled=true;
+        assertThrows(IOException.class,()->disk.partition(0,storage.length).read(0,new byte[512]));
+        assertEquals(3,resets);
+    }
+    @Test public void unitAttentionIsClearedAndRetriedButWriteProtectionIsNot() throws Exception {
+        scsiFailures=1;senseKey=6;
+        byte[] data=new byte[512];Arrays.fill(data,(byte)13);
+        disk.partition(0,storage.length).write(0,data);
+        assertArrayEquals(data,Arrays.copyOf(storage,512));assertTrue(commands.contains(3));assertEquals(0,resets);
+        scsiFailures=1;senseKey=7;
+        IOException failure=assertThrows(IOException.class,()->disk.partition(0,storage.length).write(0,new byte[512]));
+        assertTrue(failure.getMessage().contains("zabezpieczony"));
+        assertArrayEquals(data,Arrays.copyOf(storage,512));assertEquals(0,resets);
+    }
+    @Test public void shortDescriptorSenseExplainsMissingMedium() {
+        scsiFailures=1;senseKey=2;senseAsc=0x3a;shortSense=true;
+        IOException failure=assertThrows(IOException.class,()->disk.partition(0,storage.length).read(0,new byte[512]));
+        assertTrue(failure.getMessage().contains("nie ma nośnika"));assertEquals(0,resets);
+    }
+    @Test public void botAlternateSettingIsActivatedBeforeScsiAndLogicalUnitQuery() throws Exception {
+        when(face.getAlternateSetting()).thenReturn(1);
+        new UsbDisk(manager,device).close();UsbDisk.logicalUnits(manager,device);
+        verify(link,times(2)).setInterface(face);
+        when(link.setInterface(face)).thenReturn(false);
+        int before=commands.size();
+        assertThrows(IOException.class,()->new UsbDisk(manager,device));
+        assertEquals(before,commands.size());
+    }
+    @Test public void capacity16AcceptsMandatoryGeometryWithCorrectResidue() throws Exception {
+        lastLba=0x100001000L;shortCapacity=true;
+        try(UsbDisk large=new UsbDisk(manager,device)){assertEquals((lastLba+1)*512,large.capacity);}
+        assertEquals(0,resets);
+    }
+    @Test public void failedResetStopsWithoutReissuingTheDataCommand() {
+        alwaysStalled=true;
+        when(link.controlTransfer(eq(0x21),eq(0xff),eq(0),eq(0),any(),eq(0),eq(5000))).thenReturn(-1);
+        clearInvocations(link);
+        IOException failed=assertThrows(IOException.class,()->disk.partition(0,storage.length).read(0,new byte[512]));
+        assertTrue(failed.getSuppressed().length>0);
+        verify(link,times(1)).bulkTransfer(any(),any(),anyInt(),anyInt(),anyInt());
+        assertEquals(0,writes);
     }
     @Test public void comparesReleaseComponentsNumerically() {
         assertTrue(Updates.newer("v1.10.0","1.9.9"));
