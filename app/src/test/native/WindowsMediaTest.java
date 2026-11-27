@@ -7,7 +7,7 @@ import java.util.*;
 
 /** Full Windows ISO extraction smoke test for CI with bounded HTTP range caching. */
 public final class WindowsMediaTest {
-    private static final class HttpImage implements IsoTree.Reader {
+    static final class HttpImage implements IsoTree.Reader {
         private static final int CHUNK = 1048576;
         private final URL url;
         final long length;

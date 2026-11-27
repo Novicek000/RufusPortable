@@ -10,6 +10,20 @@ final class WindowsInstallProbe implements AutoCloseable {
     final Path boot;
     final WindowsCustomization customization;
     private WindowsInstallProbe(Path boot,WindowsCustomization customization) {this.boot=boot;this.customization=customization;}
+    static String firstLogonProbe(String xml) {
+        String script="Start-Sleep -Seconds 60; $os=Get-CimInstance Win32_OperatingSystem; "+
+                "@{User=$env:USERNAME;Caption=$os.Caption;Build=$os.BuildNumber;Version=$os.Version;"+
+                "Culture=(Get-Culture).Name;Timezone=(Get-TimeZone).Id;"+
+                "Portable=(Get-ItemProperty 'HKLM:\\SYSTEM\\CurrentControlSet\\Control' -ErrorAction SilentlyContinue).PortableOperatingSystem;"+
+                "ImageState=(Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Setup\\State').ImageState}"+
+                "|ConvertTo-Json|Set-Content -LiteralPath C:\\rufus-port-test.json -Encoding UTF8; shutdown.exe /s /t 0";
+        String command="powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \""+script+"\"";
+        command=command.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;");
+        if(!xml.contains("</FirstLogonCommands>"))throw new AssertionError("Missing first-logon command section");
+        xml=xml.replace("</FirstLogonCommands>","<SynchronousCommand wcm:action=\"add\"><Order>99</Order><Description>CI installation probe</Description><CommandLine>"+
+                command+"</CommandLine></SynchronousCommand></FirstLogonCommands>");
+        return xml;
+    }
     static WindowsInstallProbe prepare(List<IsoTree.Entry> entries,IsoTree.Reader source,Path assets) throws Exception {
         Path directory=Files.createTempDirectory("rufus-install-test-");
         Path boot=directory.resolve("boot.wim");
@@ -25,17 +39,7 @@ final class WindowsInstallProbe implements AutoCloseable {
                     WindowsUnattend.NO_DATA_COLLECTION|WindowsUnattend.NO_ONLINE_ACCOUNT|WindowsUnattend.DUPLICATE_LOCALE|
                     WindowsUnattend.DISABLE_BITLOCKER|WindowsUnattend.QOL_ENHANCEMENTS;
             options.setupLanguage=setup.language;options.fallbackLanguage=setup.language;
-            String script="Start-Sleep -Seconds 60; $os=Get-CimInstance Win32_OperatingSystem; "+
-                    "@{User=$env:USERNAME;Caption=$os.Caption;Build=$os.BuildNumber;Version=$os.Version;"+
-                    "Culture=(Get-Culture).Name;Timezone=(Get-TimeZone).Id;"+
-                    "ImageState=(Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Setup\\State').ImageState}"+
-                    "|ConvertTo-Json|Set-Content -LiteralPath C:\\rufus-port-test.json -Encoding UTF8; shutdown.exe /s /t 0";
-            String command="powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \""+script+"\"";
-            command=command.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;");
-            String xml=new String(WindowsUnattend.create(options),StandardCharsets.UTF_8);
-            if(!xml.contains("</FirstLogonCommands>"))throw new AssertionError("Missing first-logon command section");
-            xml=xml.replace("</FirstLogonCommands>","<SynchronousCommand wcm:action=\"add\"><Order>99</Order><Description>CI installation probe</Description><CommandLine>"+
-                    command+"</CommandLine></SynchronousCommand></FirstLogonCommands>");
+            String xml=firstLogonProbe(new String(WindowsUnattend.create(options),StandardCharsets.UTF_8));
             Path answer=directory.resolve("answer.xml");Files.writeString(answer,xml,StandardCharsets.UTF_8);
             WimMetadata.requireEditable(boot.toString());
             long length=WimMetadata.addFile(boot.toString(),index,answer.toString(),"Autounattend.xml");

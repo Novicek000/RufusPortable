@@ -35,6 +35,7 @@ public final class RegistryHiveTest {
             check(hive.get("Options","Nazwa 😀").string().equals("żółć 日本語 😀"),"saved Unicode");
             check(Arrays.equals(new byte[]{0,1,0,(byte)255},hive.get("Options","Binary").data),"binary bytes");
             check(hive.get("Options","Empty").data.length==0,"empty binary");
+            check(hive.valueNames("Options").containsAll(Arrays.asList("Nazwa 😀","Binary","Empty","Preserved","Change")),"value names");
             check(hive.get(""," ")==null && hive.get("","").string().equals("Root default"),"default value");
             check(hive.get("Options","Change").dword()==2 && hive.get("Options","Preserved").dword()==123,"replace retained other values");
             check(hive.get("Remove\\Subkey","Value")==null,"recursive deletion");

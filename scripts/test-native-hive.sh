@@ -22,6 +22,12 @@ done
     "$project_dir/app/src/test/native/HiveIconvTest.c" "$bridge_dir/hive_iconv.c" -o "$build_dir/hive-iconv-test"
 "$build_dir/hive-iconv-test"
 "$JAVA_HOME/bin/javac" -d "$build_dir" "$project_dir/app/src/main/java/pl/rufusportable/RegistryHive.java" \
-    "$project_dir/app/src/test/native/RegistryHiveTest.java"
+    "$project_dir/app/src/test/native/RegistryHiveTest.java" \
+    "$project_dir/app/src/main/java/pl/rufusportable/DiskLayout.java" \
+    "$project_dir/app/src/main/java/pl/rufusportable/WindowsToGoLayout.java" \
+    "$project_dir/app/src/main/java/pl/rufusportable/WindowsBootConfiguration.java" \
+    "$project_dir/app/src/test/native/WindowsBootConfigurationTest.java"
 "$JAVA_HOME/bin/java" -Xcheck:jni -Djava.library.path="$build_dir" -cp "$build_dir" \
     pl.rufusportable.RegistryHiveTest "$project_dir/third_party/hivex/images/minimal" "$build_dir/tests"
+"$JAVA_HOME/bin/java" -Xcheck:jni -Djava.library.path="$build_dir" -cp "$build_dir" \
+    pl.rufusportable.WindowsBootConfigurationTest "$project_dir/third_party/hivex/images/minimal" "$build_dir/tests"

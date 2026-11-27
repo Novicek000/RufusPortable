@@ -7,6 +7,45 @@
 
 #include "jni_disk.h"
 
+typedef struct {uint16_t *name;size_t length;int64_t size;int directory,reparse;} list_item;
+typedef struct {list_item *items;size_t count,capacity;} list_result;
+static int collect_entry(void *context,const uint16_t *name,size_t length,int64_t size,int directory,int reparse)
+{
+    list_result *list=context;
+    if(list->count==list->capacity) {
+        size_t capacity=list->capacity?list->capacity*2:32;
+        if(capacity>1048576){errno=EOVERFLOW;return -1;}
+        list_item *items=realloc(list->items,capacity*sizeof(*items));if(!items)return -1;
+        list->items=items;list->capacity=capacity;
+    }
+    uint16_t *copy=malloc(length*sizeof(*copy));if(!copy)return -1;memcpy(copy,name,length*sizeof(*copy));
+    list->items[list->count++]=(list_item){copy,length,size,directory,reparse};return 0;
+}
+JNIEXPORT jobjectArray JNICALL Java_pl_rufusportable_NtfsVolume_listEntries(JNIEnv *env,jclass type,jlong handle,jstring path)
+{
+    (void)type;java_volume *volume=(java_volume *)(intptr_t)handle;
+    if(!volume || !path){errno=EINVAL;io_error(env);return NULL;}
+    const jchar *name=(*env)->GetStringChars(env,path,NULL);if(!name)return NULL;
+    list_result list={0};jobjectArray result=NULL;
+    int status=rufus_ntfs_list(volume->volume,name,(*env)->GetStringLength(env,path),&list,collect_entry),saved=errno;
+    (*env)->ReleaseStringChars(env,path,name);
+    if(status){errno=saved;io_error(env);goto done;}
+    jclass entry=(*env)->FindClass(env,"pl/rufusportable/NtfsVolume$Entry");if(!entry)goto done;
+    jmethodID constructor=(*env)->GetMethodID(env,entry,"<init>","(Ljava/lang/String;JZZ)V");
+    if(constructor)result=(*env)->NewObjectArray(env,(jsize)list.count,entry,NULL);
+    if(result)for(size_t i=0;i<list.count;i++) {
+        list_item *item=&list.items[i];jstring text=(*env)->NewString(env,item->name,(jsize)item->length);if(!text)break;
+        jobject value=(*env)->NewObject(env,entry,constructor,text,(jlong)item->size,(jboolean)item->directory,(jboolean)item->reparse);
+        (*env)->DeleteLocalRef(env,text);
+        if(value){(*env)->SetObjectArrayElement(env,result,(jsize)i,value);(*env)->DeleteLocalRef(env,value);}
+        if((*env)->ExceptionCheck(env))break;
+    }
+    (*env)->DeleteLocalRef(env,entry);
+done:
+    for(size_t i=0;i<list.count;i++)free(list.items[i].name);
+    free(list.items);return result;
+}
+
 JNIEXPORT jlong JNICALL Java_pl_rufusportable_NtfsVolume_mount(
         JNIEnv *env, jclass type, jobject device, jlong size, jint sector_size)
 {

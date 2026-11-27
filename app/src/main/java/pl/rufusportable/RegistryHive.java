@@ -48,6 +48,10 @@ final class RegistryHive implements Closeable {
         requireOpen();byte[][] names=list(handle,path(path));List<String> result=new ArrayList<>();
         for(byte[] name:names)result.add(new String(name,StandardCharsets.UTF_8));return Collections.unmodifiableList(result);
     }
+    synchronized List<String> valueNames(String path) throws IOException {
+        requireOpen();byte[][] names=names(handle,path(path));List<String> result=new ArrayList<>();
+        for(byte[] name:names)result.add(new String(name,StandardCharsets.UTF_8));return Collections.unmodifiableList(result);
+    }
     synchronized void put(String path,String name,int type,byte[] data) throws IOException {
         requireOpen();if(type<0 || type>11 || data==null)throw new IOException("Nieprawidłowy typ wartości rejestru.");
         write(handle,path(path),encoded(name),type,data);
@@ -68,6 +72,7 @@ final class RegistryHive implements Closeable {
     private static native long open(byte[] filename,boolean writable) throws IOException;
     private static native byte[][] read(long handle,byte[] path,byte[] name) throws IOException;
     private static native byte[][] list(long handle,byte[] path) throws IOException;
+    private static native byte[][] names(long handle,byte[] path) throws IOException;
     private static native void write(long handle,byte[] path,byte[] name,int type,byte[] data) throws IOException;
     private static native boolean remove(long handle,byte[] path) throws IOException;
     private static native void save(long handle,byte[] filename) throws IOException;

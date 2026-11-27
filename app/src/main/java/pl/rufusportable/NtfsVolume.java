@@ -12,6 +12,19 @@ final class NtfsVolume implements Closeable {
     private long handle;
     private final Set<Closeable> files = new HashSet<>();
 
+    static final class Entry {
+        final String name;
+        final long size;
+        final boolean directory,reparse;
+        Entry(String name,long size,boolean directory,boolean reparse) {
+            this.name=name;this.size=size;this.directory=directory;this.reparse=reparse;
+        }
+    }
+    synchronized List<Entry> list(String path) throws IOException {
+        requireOpen();if(Thread.currentThread().isInterrupted())throw new InterruptedIOException();
+        return Collections.unmodifiableList(Arrays.asList(listEntries(handle,path)));
+    }
+
     NtfsVolume(BlockDevice partition) throws IOException {
         handle = mount(partition, partition.size(), partition.sectorSize());
     }
@@ -245,6 +258,7 @@ final class NtfsVolume implements Closeable {
     }
 
     private static native long openUpdate(long volume,String path) throws IOException;
+    private static native Entry[] listEntries(long volume,String path) throws IOException;
     private static native long fileSize(long file) throws IOException;
     private static native void truncate(long file,long length) throws IOException;
     private static native void syncFile(long file) throws IOException;

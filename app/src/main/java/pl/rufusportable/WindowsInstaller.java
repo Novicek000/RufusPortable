@@ -171,7 +171,7 @@ final class WindowsInstaller {
         }
     }
 
-    private static void installBootCode(BlockDevice partition, byte[] prefix, byte[] code,
+    static void installBootCode(BlockDevice partition, byte[] prefix, byte[] code,
             boolean verify) throws IOException {
         byte[] boot = new byte[4608];
         partition.read(0, boot);

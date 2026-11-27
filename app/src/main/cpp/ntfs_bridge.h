@@ -25,6 +25,8 @@ rufus_ntfs *rufus_ntfs_mount(rufus_disk *disk);
 /* Borrowed native volume, valid only until unmount. */
 void *rufus_ntfs_native_volume(rufus_ntfs *volume);
 int rufus_ntfs_mkdir(rufus_ntfs *volume, const uint16_t *path, size_t length);
+typedef int (*rufus_ntfs_emit)(void *context,const uint16_t *name,size_t length,int64_t size,int directory,int reparse);
+int rufus_ntfs_list(rufus_ntfs *volume,const uint16_t *path,size_t length,void *context,rufus_ntfs_emit emit);
 rufus_ntfs_file *rufus_ntfs_create(rufus_ntfs *volume, const uint16_t *path, size_t length);
 rufus_ntfs_file *rufus_ntfs_open(rufus_ntfs *volume, const uint16_t *path, size_t length);
 rufus_ntfs_file *rufus_ntfs_open_update(rufus_ntfs *volume, const uint16_t *path, size_t length);

@@ -246,6 +246,9 @@ public class WimProxyTest {
                 assertNull(proxy.sourceFailure());assertTrue(callbacks[0]>1);assertEquals(last[1],last[0]);assertTrue(last[1]>0);
                 assertTrue(disk.highestWrite>0xffffffffL);
                 try(NtfsVolume volume=new NtfsVolume(disk)) {
+                    assertTrue(volume.list("").stream().anyMatch(e->e.name.equals("żółć") && e.directory));
+                    NtfsVolume.Entry listed=volume.list("żółć").stream().filter(e->e.name.equals("日本語.txt")).findFirst().orElseThrow();
+                    assertFalse(listed.directory);assertFalse(listed.reparse);assertTrue(listed.size>0);
                     for(String path:new String[]{"rich/data.bin","rich/alias.bin"}) {
                         byte[] data=bytes(volume.open(path));assertEquals(170003,data.length);
                         byte[] digest=java.security.MessageDigest.getInstance("SHA-256").digest(data);

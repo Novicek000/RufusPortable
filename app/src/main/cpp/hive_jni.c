@@ -79,26 +79,33 @@ JNIEXPORT jobjectArray JNICALL Java_pl_rufusportable_RegistryHive_read(JNIEnv *e
     }
 done:free(key);free(value_name);free(data);return result;
 }
-JNIEXPORT jobjectArray JNICALL Java_pl_rufusportable_RegistryHive_list(JNIEnv *env,jclass type,jlong handle,jbyteArray path)
-{
-    (void)type;hive_h *hive=(hive_h *)(intptr_t)handle;char *key=text(env,path);hive_node_h *children=NULL;jobjectArray result=NULL;
+static jobjectArray names(JNIEnv *env,hive_h *hive,jbyteArray path,int values)
+{char *key=text(env,path);hive_node_h *children=NULL;jobjectArray result=NULL;
     if(!key)return NULL;
     hive_node_h key_node=node(env,hive,key,0);
     if((*env)->ExceptionCheck(env))goto done;
     size_t count=0;
-    if(key_node){children=hivex_node_children(hive,key_node);if(!children){error(env);goto done;}while(children[count])count++;}
+    if(key_node){children=values?hivex_node_values(hive,key_node):hivex_node_children(hive,key_node);if(!children){error(env);goto done;}while(children[count])count++;}
     if(count>INT32_MAX){errno=EOVERFLOW;error(env);goto done;}
     jclass array_type=(*env)->FindClass(env,"[B");
     if(array_type){result=(*env)->NewObjectArray(env,(jsize)count,array_type,NULL);(*env)->DeleteLocalRef(env,array_type);}
     if(result)for(size_t i=0;i<count;i++) {
-        char *name=hivex_node_name(hive,children[i]);if(!name){error(env);break;}
-        errno=0;size_t length=hivex_node_name_len(hive,children[i]);
+        char *name=values?hivex_value_key(hive,children[i]):hivex_node_name(hive,children[i]);if(!name){error(env);break;}
+        errno=0;size_t length=values?hivex_value_key_len(hive,children[i]):hivex_node_name_len(hive,children[i]);
         if(errno){free(name);error(env);break;}
         jbyteArray value=bytes(env,name,length);free(name);
         if(value){(*env)->SetObjectArrayElement(env,result,(jsize)i,value);(*env)->DeleteLocalRef(env,value);}
         if((*env)->ExceptionCheck(env))break;
     }
 done:free(children);free(key);return result;
+}
+JNIEXPORT jobjectArray JNICALL Java_pl_rufusportable_RegistryHive_list(JNIEnv *env,jclass type,jlong handle,jbyteArray path)
+{
+    (void)type;return names(env,(hive_h *)(intptr_t)handle,path,0);
+}
+JNIEXPORT jobjectArray JNICALL Java_pl_rufusportable_RegistryHive_names(JNIEnv *env,jclass type,jlong handle,jbyteArray path)
+{
+    (void)type;return names(env,(hive_h *)(intptr_t)handle,path,1);
 }
 JNIEXPORT void JNICALL Java_pl_rufusportable_RegistryHive_write(JNIEnv *env,jclass type,jlong handle,jbyteArray path,jbyteArray name,jint value_type,jbyteArray data)
 {

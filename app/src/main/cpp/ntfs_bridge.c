@@ -331,6 +331,30 @@ int rufus_ntfs_mkdir(rufus_ntfs *volume, const uint16_t *path, size_t length)
     return inode ? ntfs_inode_close(inode) : -1;
 }
 
+typedef struct {rufus_ntfs *volume;void *context;rufus_ntfs_emit emit;} listing;
+static int list_entry(void *context,const ntfschar *name,int length,int name_type,s64 position,MFT_REF reference,unsigned type)
+{
+    (void)position;(void)type;listing *list=context;
+    if(name_type==FILE_NAME_DOS || (length==1 && name[0]==const_cpu_to_le16('.')) ||
+            (length==2 && name[0]==const_cpu_to_le16('.') && name[1]==const_cpu_to_le16('.')))return 0;
+    if(length<1 || length>255){errno=EIO;return -1;}
+    ntfs_inode *inode=ntfs_inode_open(list->volume->volume,reference);if(!inode)return -1;
+    int directory=!!(inode->mrec->flags&MFT_RECORD_IS_DIRECTORY),reparse=!!(inode->flags&FILE_ATTR_REPARSE_POINT);
+    int64_t size=directory?0:inode->data_size;int result=ntfs_inode_close(inode);if(result)return result;
+    uint16_t host_name[255];for(int i=0;i<length;i++)host_name[i]=le16_to_cpu(name[i]);
+    return list->emit(list->context,host_name,(size_t)length,size,directory,reparse);
+}
+int rufus_ntfs_list(rufus_ntfs *volume,const uint16_t *path,size_t length,void *context,rufus_ntfs_emit emit)
+{
+    if(!volume || !path || !emit){errno=EINVAL;return -1;}
+    ntfs_inode *inode=length?resolve_entry(volume,path,length,0):ntfs_inode_open(volume->volume,FILE_root);
+    if(!inode)return -1;
+    if(!(inode->mrec->flags&MFT_RECORD_IS_DIRECTORY)){ntfs_inode_close(inode);errno=ENOTDIR;return -1;}
+    listing list={volume,context,emit};s64 position=0;
+    int result=ntfs_readdir(inode,&position,&list,list_entry),saved=errno;
+    int closed=ntfs_inode_close(inode);if(result){errno=saved;return result;}return closed;
+}
+
 static rufus_ntfs_file *open_file(rufus_ntfs *volume, const uint16_t *path, size_t length, int creating)
 {
     rufus_ntfs_file *file = calloc(1, sizeof(*file));

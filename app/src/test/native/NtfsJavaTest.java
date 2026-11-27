@@ -56,6 +56,16 @@ public final class NtfsJavaTest {
             NtfsVolume.RandomFile randomAfterClose;
             try(NtfsVolume volume=new NtfsVolume(device)) {
                 volume.mkdir("efi");volume.mkdir("efi/boot");volume.mkdir("żółć");
+                for(int i=0;i<75;i++)try(OutputStream file=volume.create("żółć/日本語 😀 "+i+".bin")){file.write(new byte[i]);}
+                java.util.List<NtfsVolume.Entry> listing=volume.list("żółć");
+                if(listing.size()!=75)throw new AssertionError("Directory enumeration lost entries or returned DOS aliases");
+                for(int i=0;i<75;i++) {
+                    String name="日本語 😀 "+i+".bin";int expectedSize=i;
+                    NtfsVolume.Entry entry=listing.stream().filter(e->e.name.equals(name)).findFirst().orElseThrow();
+                    if(entry.directory || entry.reparse || entry.size!=expectedSize)throw new AssertionError("Directory entry metadata mismatch");
+                }
+                if(volume.list("").stream().noneMatch(e->e.name.equals("żółć") && e.directory))throw new AssertionError("Root enumeration lost Unicode directory");
+                try {volume.list("missing");throw new AssertionError("Missing directory accepted");}catch(IOException expected){}
                 try(OutputStream file=volume.create("efi/boot/payload.bin")) {
                     byte[] data=new byte[170001];
                     for(int i=0;i<data.length;i++)data[i]=(byte)(i*17+9);
@@ -68,6 +78,7 @@ public final class NtfsJavaTest {
                     if(!java.util.Arrays.equals(actual,expected))throw new AssertionError("native read mismatch");
                     if(in.read()!=-1 || in.read(new byte[1],0,0)!=0)throw new AssertionError("EOF handling");
                 }
+                try {volume.list("efi/boot/payload.bin");throw new AssertionError("Listing regular file accepted");}catch(IOException expected){}
                 try(OutputStream file=volume.create("random.bin")) {file.write(new byte[200003]);}
                 randomAfterClose=volume.openRandom("random.bin");
                 byte[] patch=new byte[170007];

@@ -15,6 +15,7 @@ def main():
     parser.add_argument("target", type=pathlib.Path)
     parser.add_argument("output", type=pathlib.Path)
     parser.add_argument("--timeout", type=int, default=7200)
+    parser.add_argument("--wintogo", action="store_true", help="Boot the applied USB image across resets and check its Windows partition")
     parser.add_argument("--firmware", type=pathlib.Path, default=pathlib.Path("/usr/share/OVMF"))
     args = parser.parse_args()
     if not args.media.is_file() or args.media.resolve() == args.target.resolve():
@@ -36,7 +37,7 @@ def main():
                "-device", "ide-hd,drive=target,bus=ide.0,rotation_rate=1,bootindex=2",
                "-device", "qemu-xhci,id=xhci",
                "-drive", f"if=none,id=install,format=raw,cache=writeback,file={args.media.resolve()}",
-               "-device", "usb-storage,id=installusb,drive=install,bus=xhci.0,removable=on,bootindex=1",
+               "-device", "usb-storage,id=installusb,drive=install,bus=xhci.0,removable=" + ("off" if args.wintogo else "on") + ",bootindex=1",
                "-display", "none", "-vga", "std", "-net", "none", "-serial", "file:" + str(args.output.resolve() / "serial.log"),
                "-monitor", "none", "-qmp", f"unix:{qmp_path},server=on,wait=off"]
     started = time.monotonic()
@@ -111,7 +112,7 @@ def main():
                     raise
                 for event in events:
                     print(json.dumps(event), flush=True)
-                    if event.get("event") == "RESET" and event.get("data", {}).get("guest") and not detached:
+                    if event.get("event") == "RESET" and event.get("data", {}).get("guest") and not detached and not args.wintogo:
                         # Setup copied its installation files before its first reboot. Remove only the
                         # generated USB device, so the new Windows Boot Manager starts on the target.
                         execute("device_del", {"id": "installusb"})
@@ -136,7 +137,8 @@ def main():
 
     # Read the third GPT partition, the destination chosen by the unmodified Rufus
     # disk configuration. The VM is stopped; ntfscat never reads a live guest filesystem.
-    with args.target.open("rb") as target:
+    installed = args.media if args.wintogo else args.target
+    with installed.open("rb") as target:
         target.seek(512)
         header = target.read(512)
         if header[:8] != b"EFI PART":
@@ -149,10 +151,10 @@ def main():
         partition = target.read(entry_size)
         start = int.from_bytes(partition[32:40], "little")
         end = int.from_bytes(partition[40:48], "little")
-        if not start or end < start or (end + 1) * 512 > args.target.stat().st_size:
+        if not start or end < start or (end + 1) * 512 > installed.stat().st_size:
             raise AssertionError("Windows target partition is missing")
     device = subprocess.check_output(["sudo", "losetup", "--find", "--show", "--read-only", "--offset", str(start * 512),
-                                      "--sizelimit", str((end - start + 1) * 512), str(args.target.resolve())], text=True).strip()
+                                      "--sizelimit", str((end - start + 1) * 512), str(installed.resolve())], text=True).strip()
     try:
         result = subprocess.check_output(["sudo", "ntfscat", device, "/rufus-port-test.json"])
         (args.output / "installed-windows.json").write_bytes(result)
@@ -166,6 +168,8 @@ def main():
         assert information["ImageState"] == "IMAGE_STATE_COMPLETE", information
         assert information["Culture"].lower() == "en-us", information
         assert information["Timezone"] == "UTC", information
+        if args.wintogo:
+            assert information.get("Portable") == 1, information
         print("Windows installation and first-logon probe passed:", json.dumps(information), flush=True)
     finally:
         subprocess.run(["sudo", "losetup", "--detach", device], check=True)
