@@ -77,11 +77,13 @@ public class WimProxyTest {
         final RandomAccessFile file;
         boolean failSync;
         final long capacity;
+        final int blockSize;
         long highestWrite;
         FileDisk(File path) throws IOException {this(path,128L<<20);}
-        FileDisk(File path,long capacity) throws IOException {this.capacity=capacity;file=new RandomAccessFile(path,"rw");file.setLength(capacity);}
+        FileDisk(File path,long capacity) throws IOException {this(path,capacity,512);}
+        FileDisk(File path,long capacity,int blockSize) throws IOException {this.capacity=capacity;this.blockSize=blockSize;file=new RandomAccessFile(path,"rw");file.setLength(capacity);}
         public long size(){return capacity;}
-        public int sectorSize(){return 512;}
+        public int sectorSize(){return blockSize;}
         public synchronized void read(long offset,byte[] data)throws IOException{file.seek(offset);file.readFully(data);}
         public synchronized void write(long offset,byte[] data)throws IOException{highestWrite=Math.max(highestWrite,offset+data.length);file.seek(offset);file.write(data);}
         public void sync()throws IOException{if(failSync)throw new IOException("injected target sync failure");file.getFD().sync();}
@@ -272,6 +274,31 @@ public class WimProxyTest {
                 try(NtfsVolume volume=new NtfsVolume(disk)){assertEquals(170003,bytes(volume.open("rich/data.bin")).length);}
             }
         } finally {assertTrue(source.delete());assertTrue(target.delete());}
+    }
+
+    @Test public void copiesAppliedNtfsFilesToUnicodeFat32EspOn4kSectors() throws Exception {
+        Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
+        File source=File.createTempFile("esp-source-", ".wim",context.getCacheDir());
+        File ntfs=File.createTempFile("esp-ntfs-", ".img",context.getCacheDir());
+        File esp=new File(context.getCacheDir(),"fat-esp-test.img");boolean keep=false;
+        try {
+            try(OutputStream out=new FileOutputStream(source)){out.write(applyFixture());}
+            try(FileDisk ntfsDisk=new FileDisk(ntfs);FileDisk fatDisk=new FileDisk(esp,512L<<20,4096)) {
+                NtfsVolume.format(ntfsDisk,"ESP_SOURCE",4096,2048,true);
+                WimMetadata.apply(source.getAbsolutePath(),1,ntfsDisk,(a,b,c,d)->{});
+                List<IsoTree.Entry> entries=Arrays.asList(new IsoTree.Entry("EFI",true,0,0),
+                        new IsoTree.Entry("EFI/Boot",true,0,0),new IsoTree.Entry("EFI/Microsoft",true,0,0),
+                        new IsoTree.Entry("EFI/Microsoft/Boot",true,0,0),new IsoTree.Entry("EFI/Microsoft/Boot/Fonts",true,0,0),
+                        new IsoTree.Entry("EFI/Boot/bootaa64.efi",false,0,170003),
+                        new IsoTree.Entry("EFI/Microsoft/Boot/Fonts/abcdefghijkl😀.ttf",false,0,"Original żółć 日本語 😀 data.\n".getBytes(java.nio.charset.StandardCharsets.UTF_8).length));
+                try(NtfsVolume volume=new NtfsVolume(ntfsDisk)) {
+                    FatVolume fat=new FatVolume(entries,fatDisk.size(),4096,32,4096,"",256);
+                    fat.install(fatDisk,entry->volume.open(entry.path.equals("EFI/Boot/bootaa64.efi")?"rich/data.bin":"żółć/日本語.txt"),
+                            true,true,(phase,path,done,total)->assertTrue(done>=0 && done<=total));
+                }
+                fatDisk.sync();keep=true;
+            }
+        } finally {assertTrue(source.delete());assertTrue(ntfs.delete());if(!keep)assertTrue(esp.delete());}
     }
 
 }

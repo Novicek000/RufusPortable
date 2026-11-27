@@ -14,7 +14,7 @@ Celem jest zgodność funkcjonalna z Rufusem z rewizji 8337c3e7e534b5d5b5045dd8e
 | UDF | Czytnik partycji fizycznych, alokacji krótkiej/długiej/osadzonej i fragmentów, test rzeczywistego Windows 11 ISO |
 | NTFS | Biblioteka pbatard/ntfs-3g i JNI dla czterech ABI w APK; tworzenie katalogów, zapis plików i natywne szybkie/pełne formatowanie przez adapter dyskowy sprawdzone; integracja instalatora w toku |
 | UEFI:NTFS | Oryginalny obraz Rufusa w zasobach aplikacji; generator GPT/MBR odwzorowuje układ i typy partycji, wypakowywanie i łańcuch UEFI:NTFS zintegrowane, start Windows PE potwierdzony w QEMU |
-| FAT16/FAT32/exFAT | Istnieją podstawowe generatory FAT32/exFAT, potrzebna pełna obsługa drzewa plików i zgodność opcji |
+| FAT16/FAT32/exFAT | Pełny silnik drzewa FAT16/FAT32 sprawdzony niezależnymi narzędziami i na Androidzie; integracja opcji i rozruchu w toku, exFAT wymaga pełnego drzewa |
 | UDF, ReFS, ext2/ext3/ext4 jako system docelowy | Do implementacji |
 | Wiele LUN | Wykrywanie GET_MAX_LUN, wybór jednostki i adresowanie CBW; testy symulowanego transportu |
 | UAS | Do implementacji i testów |
@@ -172,3 +172,13 @@ Test hosta aplikuje własny WIM na NTFS 128 MiB i 64 GiB, sprawdza treść Unico
 68 testów Java, lint, budowanie APK z czterema ABI i dziewięć testów Androida API 26 / x86 przeszły. Nowy test Androida aplikuje WIM z dwóch ekstentów źródła, z drugim powyżej 4 GiB, na rzadki cel 64 GiB i porównuje treść i SHA-256 odczytanych plików po ponownym zamontowaniu. Drugi sprawdza anulowanie i ponowienie. To jest silnik aplikowania obrazu; nie stanowi jeszcze uruchamialnego trybu Windows To Go w interfejsie.
 
 [CI 46072993307](https://github.com/Novicek000/RufusPortable/actions/runs/46072993307) potwierdziło wcześniejszą rewizję 5f13fee na API 26 i 35, w tym podmianę zasobów CA 2023 i kompaktowanie WIM.
+
+## FAT16/FAT32 i partycja EFI
+
+FatVolume planuje pełne drzewo przed zapisem: sprawdza pojemność, rozmiary plików, katalogi nadrzędne, nazwy i kolizje; tworzy unikalne aliasy 8.3, wpisy VFAT i wieloklastrowe katalogi. Obsługuje sektory 512–4096 B, klastry do 64 KiB, dwie tablice FAT, backup i FSInfo FAT32, puste etykiety EFI oraz szybkie/pełne formatowanie. Nie przyjmuje plików większych niż 4 GiB minus jeden bajt. Katalogi i tablice zapisuje porcjami do 128 KiB, a pliki strumieniowo. Po synchronizacji weryfikuje SHA-256 metadanych i danych.
+
+Test hosta utworzył siedem wariantów, w tym FAT16/FAT32 dla sektorów 512 B i 4 KiB, puste FAT32, pełne zerowanie FAT16 oraz daty przy lokalizacji tajskiej. Wszystkie przeszły fsck.fat bez napraw. W czterech wariantach PyFat odczytał dokładne nazwy i SHA-256 wszystkich 1710 plików, w tym 1700 aliasów ze wspólnym początkiem, maksymalną nazwę 255 jednostek UTF-16, nazwę długości 13 i parę surogatów rozdzieloną między wpisy VFAT. Mtools potwierdził dane; jego ograniczenie znaków spoza BMP sprawdzane jest osobno od dokładnych nazw odczytanych przez PyFat. Testy wykrywają uszkodzone metadane, dane i skrócone źródło oraz anulowanie przed formatowaniem.
+
+68 testów Java, lint, budowanie APK i dziesięć testów Androida API 26 / x86 przeszły. Nowy test kopiuje dane z natywnego NTFS po aplikowaniu WIM do FAT32 z sektorami 4 KiB i pustą etykietą. Wyeksportowany rzadki obraz 512 MiB z emulatora przeszedł ponownie fsck.fat oraz niezależne porównanie nazw Unicode i SHA-256 obu plików. Są to własne niebootowalne dane testowe. Integracja tego silnika z wyborem systemu plików i pełny rozruch Windows To Go nadal pozostają do wykonania.
+
+[CI 46075286618](https://github.com/Novicek000/RufusPortable/actions/runs/46075286618) potwierdziło wcześniejszą rewizję 97f34fc na Androidzie API 26 i 35, w tym aplikowanie WIM przez NTFS i anulowanie.
