@@ -204,6 +204,22 @@ public class StartScreenTest {
             for(String title:new String[]{ca,policy,mode})assertTrue(((android.widget.CheckBox)find(root,title)).isChecked());
         }
     }
+    @Test public void removesNestedWorkingFilesWithoutFollowingSymbolicLinks() throws Exception {
+        var base=java.nio.file.Files.createTempDirectory("rufus-cleanup-test-");
+        var working=java.nio.file.Files.createDirectories(base.resolve("working/EFI_EX/sub"));
+        java.nio.file.Files.write(working.resolve("file.efi"),new byte[]{1});
+        var outside=java.nio.file.Files.createDirectory(base.resolve("outside"));
+        java.nio.file.Files.write(outside.resolve("keep.txt"),new byte[]{2});
+        java.nio.file.Files.createSymbolicLink(base.resolve("working/Fonts_EX"),outside);
+        var clear=MainActivity.class.getDeclaredMethod("clear",File.class);clear.setAccessible(true);
+        try {
+            clear.invoke(null,base.resolve("working").toFile());
+            assertFalse(java.nio.file.Files.exists(base.resolve("working")));
+            assertArrayEquals(new byte[]{2},java.nio.file.Files.readAllBytes(outside.resolve("keep.txt")));
+        } finally {
+            java.nio.file.Files.delete(outside.resolve("keep.txt"));java.nio.file.Files.delete(outside);java.nio.file.Files.delete(base);
+        }
+    }
     @Test public void existingOemAnswerSkipsCustomizationControls() throws Exception {
         Shadows.shadowOf(RuntimeEnvironment.getApplication()).grantPermissions(
                 "pl.rufusportable.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION");

@@ -18,6 +18,8 @@ import com.google.android.material.checkbox.MaterialCheckBox;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.progressindicator.LinearProgressIndicator;
 import java.io.*;
+import java.nio.file.*;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.*;
 import java.util.concurrent.*;
 
@@ -857,8 +859,17 @@ public class MainActivity extends AppCompatActivity {
         if (flashing) writeAction(); else super.onBackPressed();
     }
     private static void clear(File dir) {
-        File[] files=dir.listFiles(); if (files!=null) for (File f:files) f.delete();
-        dir.delete();
+        try {
+            Files.walkFileTree(dir.toPath(),new SimpleFileVisitor<Path>() {
+                @Override public FileVisitResult visitFile(Path path,BasicFileAttributes attributes) throws IOException {
+                    Files.delete(path);return FileVisitResult.CONTINUE;
+                }
+                @Override public FileVisitResult postVisitDirectory(Path path,IOException error) throws IOException {
+                    if(error!=null)throw error;
+                    Files.delete(path);return FileVisitResult.CONTINUE;
+                }
+            });
+        } catch(IOException error) {android.util.Log.w("RufusPortable","Nie można usunąć katalogu roboczego",error);}
     }
     @Override protected void onDestroy() {
         cancel=true;
