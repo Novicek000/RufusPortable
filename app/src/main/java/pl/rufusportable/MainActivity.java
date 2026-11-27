@@ -35,7 +35,7 @@ public class MainActivity extends AppCompatActivity {
     private TextView imageName, imageMeta, deviceName, deviceMeta, status, release;
     private LinearProgressIndicator progress;
     private String installed, newTag;
-    private MaterialButton settings, hash, other;
+    private MaterialButton settings, hash, other, wimInfo;
     private boolean gpt, verifyWrite=true, useIso, testMedia, dos;
     private int ntfsClusterSize=4096;
     private boolean quickFormat=true;
@@ -150,6 +150,7 @@ public class MainActivity extends AppCompatActivity {
                     if (i<2) builtin(i==0);
                     else startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse("https://www.microsoft.com/pl-pl/software-download/windows11")));
                 }).setNegativeButton("Anuluj",null).show(),false);
+        wimInfo=button(source,"Obrazy Windows w ISO",this::inspectWim,false);
         LinearLayout destination = card(R.color.panel,24);
         label(destination,"Nośnik docelowy",15,true);
         deviceName = label(destination,"Podłącz pendrive",22,true);
@@ -175,6 +176,7 @@ public class MainActivity extends AppCompatActivity {
     private void refresh() {
         settings.setEnabled(!busy && image!=null);
         other.setEnabled(!busy);
+        wimInfo.setVisibility(image!=null && image.iso?View.VISIBLE:View.GONE); wimInfo.setEnabled(!busy);
         hash.setVisibility(image==null || image.uri==null?View.GONE:View.VISIBLE); hash.setEnabled(!busy);
         choose.setEnabled(!busy); connect.setEnabled(!busy);
         write.setEnabled(flashing ? !cancel : !busy && image != null && target != null);
@@ -293,6 +295,41 @@ public class MainActivity extends AppCompatActivity {
                 for (byte v:digest.digest()) value.append(String.format(Locale.ROOT,"%02x",v&255));
                 ui(()->{setBusy(false); status.setText("SHA-256 · "+selected.name+"\n"+value);status.setTextIsSelectable(true);});
             } catch (Exception e) { error(e); }
+        });
+    }
+    private void inspectWim() {
+        ImageFile selected=image;
+        setBusy(true);
+        status.setText("Odczytywanie informacji WIM…");
+        preparation=diskWork.submit(()->{
+            try {
+                IsoTree.Entry install=selected.contents(this).stream()
+                        .filter(e->!e.directory && (e.path.equalsIgnoreCase("sources/install.wim") ||
+                                e.path.equalsIgnoreCase("sources/install.esd")))
+                        .findFirst().orElseThrow(()->new IOException("W obrazie nie znaleziono install.wim ani install.esd."));
+                List<WimMetadata.Image> images;
+                try (ProxyImageFile file=new ProxyImageFile(this,selected,install)) {
+                    try {
+                        images=WimMetadata.read(file.path());
+                    } catch (IOException error) {
+                        if (file.sourceFailure()!=null) error.addSuppressed(file.sourceFailure());
+                        throw error;
+                    }
+                }
+                StringBuilder text=new StringBuilder();
+                for (WimMetadata.Image item:images) {
+                    if (text.length()>0) text.append("\n\n");
+                    text.append(item.displayName());
+                    if (!item.platform().isEmpty()) text.append(" · ").append(item.platform());
+                    if (!item.build.isEmpty()) text.append("\nKompilacja ").append(item.build);
+                }
+                String message=text.length()==0?"WIM nie zawiera obrazów.":text.toString();
+                ui(()->{
+                    setBusy(false);status.setText("Odczytano informacje o obrazach Windows.");
+                    new MaterialAlertDialogBuilder(this).setTitle("Obrazy Windows")
+                            .setMessage(message).setPositiveButton("Zamknij",null).show();
+                });
+            } catch (Exception error) { error(error); }
         });
     }
     private boolean connected(UsbDevice device) {

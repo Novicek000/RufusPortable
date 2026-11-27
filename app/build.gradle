@@ -10,6 +10,7 @@ android {
         targetSdk 35
         versionCode 2
         versionName '1.1.0'
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
@@ -18,6 +19,8 @@ android {
 }
 dependencies {
     implementation 'com.google.android.material:material:1.14.0'
+    androidTestImplementation 'androidx.test:runner:1.6.2'
+    androidTestImplementation 'androidx.test.ext:junit:1.2.1'
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'org.robolectric:robolectric:4.16.1'
     testImplementation 'org.mockito:mockito-core:5.14.2'
@@ -30,8 +33,25 @@ def nativeNtfs = tasks.register('buildNativeNtfs', Exec) {
             new File(System.getenv('ANDROID_HOME') ?: '', 'ndk/27.2.12479018').absolutePath
     inputs.file rootProject.file('scripts/build-ntfs.sh')
     inputs.dir rootProject.file('scripts/patches/ntfs-3g')
-    inputs.dir file('src/main/cpp')
+    inputs.files file('src/main/cpp/ntfs_bridge.c'), file('src/main/cpp/ntfs_bridge.h'), file('src/main/cpp/ntfs_jni.c'), file('src/main/cpp/ntfs_format.c')
     inputs.dir rootProject.file('third_party/ntfs-3g')
-    outputs.dir layout.buildDirectory.dir('native/jniLibs')
+    outputs.files(['arm64-v8a', 'armeabi-v7a', 'x86_64', 'x86'].collect {
+        layout.buildDirectory.file("native/jniLibs/${it}/librufus_ntfs.so")
+    })
 }
 tasks.named('preBuild').configure { dependsOn nativeNtfs }
+
+def nativeWim = tasks.register('buildNativeWim', Exec) {
+    workingDir rootProject.projectDir
+    commandLine 'bash', 'scripts/build-wim.sh', 'arm64-v8a', 'armeabi-v7a', 'x86_64', 'x86'
+    environment 'ANDROID_NDK_HOME', System.getenv('ANDROID_NDK_HOME') ?:
+            new File(System.getenv('ANDROID_HOME') ?: '', 'ndk/27.2.12479018').absolutePath
+    inputs.file rootProject.file('scripts/build-wim.sh')
+    inputs.dir rootProject.file('scripts/patches/wimlib')
+    inputs.files file('src/main/cpp/wim_jni.c'), file('src/main/cpp/wim_glob.c'), file('src/main/cpp/wim_glob.h')
+    inputs.dir rootProject.file('third_party/wimlib')
+    outputs.files(['arm64-v8a', 'armeabi-v7a', 'x86_64', 'x86'].collect {
+        layout.buildDirectory.file("native/jniLibs/${it}/librufus_wim.so")
+    })
+}
+tasks.named('preBuild').configure { dependsOn nativeWim }

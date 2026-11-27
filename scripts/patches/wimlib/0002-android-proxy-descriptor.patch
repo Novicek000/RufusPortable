@@ -1,0 +1,72 @@
+--- a/src/wim.c
++++ b/src/wim.c
+@@ -25,6 +25,7 @@
+ 
+ #include <errno.h>
+ #include <fcntl.h>
++#include <limits.h>
+ #include <stdlib.h>
+ #include <sys/stat.h>
+ #include <unistd.h>
+@@ -616,12 +617,48 @@
+ 	wim->progctx = progctx;
+ }
+ 
++/* Android AppFuse permits only one open per proxy inode.  Duplicating the
++ * already open descriptor preserves random access without reopening the inode.
++ * These views are read-only; keep the descriptor path instead of canonicalizing
++ * it into an AppFuse pathname that cannot be reopened later. */
++#ifdef __ANDROID__
++static int
++android_proxy_fd(const tchar *filename)
++{
++	static const char prefix[] = "/proc/self/fd/";
++	char *end;
++	long number;
++	if (strncmp(filename, prefix, sizeof(prefix) - 1) != 0)
++		return -1;
++	const char *digits = filename + sizeof(prefix) - 1;
++	if (*digits < '0' || *digits > '9')
++		return -1;
++	errno = 0;
++	number = strtol(digits, &end, 10);
++	if (errno || *end || number < 0 || number > INT_MAX)
++		return -1;
++	return (int)number;
++}
++#endif
++
+ static int
+ open_wim_file(const tchar *filename, struct filedes *fd_ret)
+ {
+ 	int raw_fd;
+ 
++#ifdef __ANDROID__
++	int proxy_fd = android_proxy_fd(filename);
++	raw_fd = proxy_fd >= 0 ? fcntl(proxy_fd, F_DUPFD_CLOEXEC, 0) :
++		 topen(filename, O_RDONLY | O_BINARY);
++	if (proxy_fd >= 0 && raw_fd >= 0 && lseek(raw_fd, 0, SEEK_SET) < 0) {
++		int saved_errno = errno;
++		close(raw_fd);
++		errno = saved_errno;
++		raw_fd = -1;
++	}
++#else
+ 	raw_fd = topen(filename, O_RDONLY | O_BINARY);
++#endif
+ 	if (raw_fd < 0) {
+ 		ERROR_WITH_ERRNO("Can't open \"%"TS"\" read-only", filename);
+ 		return WIMLIB_ERR_OPEN;
+@@ -668,7 +705,12 @@
+ 		 * Warning: in Windows native builds, realpath() calls the
+ 		 * replacement function in win32_replacements.c.
+ 		 */
++#ifdef __ANDROID__
++		wim->filename = android_proxy_fd(wimfile) >= 0 ?
++			STRDUP(wimfile) : realpath(wimfile, NULL);
++#else
+ 		wim->filename = realpath(wimfile, NULL);
++#endif
+ 		if (!wim->filename) {
+ 			ERROR_WITH_ERRNO("Failed to get full path to file "
+ 					 "\"%"TS"\"", wimfile);

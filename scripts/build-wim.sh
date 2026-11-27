@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+set -euo pipefail
+project_dir="$(cd "$(dirname "$0")/.." && pwd)"
+: "${ANDROID_NDK_HOME:?Set ANDROID_NDK_HOME to Android NDK r27c}"
+native_root="$project_dir/app/build/native"
+source_dir="$native_root/source/wimlib"
+bridge_dir="$project_dir/app/src/main/cpp"
+toolchain="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+if [[ ! -f "$source_dir/configure" ]]; then
+    mkdir -p "$source_dir"
+    cp -R "$project_dir/third_party/wimlib/." "$source_dir/"
+    (cd "$source_dir" && autoreconf -fi)
+fi
+for source_patch in "$project_dir/scripts/patches/wimlib/"*.patch; do
+    if ! patch --directory="$source_dir" --strip=1 --reverse --dry-run --silent --force < "$source_patch" >/dev/null 2>&1; then
+        patch --directory="$source_dir" --strip=1 --forward --batch < "$source_patch"
+    fi
+done
+cp "$bridge_dir/wim_glob.h" "$source_dir/include/wimlib/rufus_glob.h"
+for abi in "${@:-arm64-v8a}"; do
+    case "$abi" in
+        arm64-v8a) target=aarch64-linux-android; compiler=aarch64-linux-android26-clang ;;
+        armeabi-v7a) target=arm-linux-androideabi; compiler=armv7a-linux-androideabi26-clang ;;
+        x86_64) target=x86_64-linux-android; compiler=x86_64-linux-android26-clang ;;
+        x86) target=i686-linux-android; compiler=i686-linux-android26-clang ;;
+        *) echo "Unsupported Android ABI $abi" >&2; exit 1 ;;
+    esac
+    build_dir="$native_root/$abi/wim"
+    mkdir -p "$build_dir"
+    (
+        cd "$build_dir"
+        CC="$toolchain/$compiler" AR="$toolchain/llvm-ar" RANLIB="$toolchain/llvm-ranlib" \
+        NM="$toolchain/llvm-nm" STRIP="$toolchain/llvm-strip" \
+        CFLAGS="-O2 -fPIC -ffunction-sections -fdata-sections" \
+            "$source_dir/configure" --host="$target" --without-ntfs-3g --without-fuse \
+            --enable-static --disable-shared
+        make -j"${BUILD_JOBS:-2}" libwim.la
+        output_dir="$native_root/jniLibs/$abi"
+        mkdir -p "$output_dir"
+        "$toolchain/$compiler" -shared -std=gnu11 -fPIC -fvisibility=hidden \
+            -ffunction-sections -fdata-sections -O2 -Wall -Wextra -Werror \
+            -I "$build_dir" -I "$source_dir/include" \
+            "$bridge_dir/wim_jni.c" "$bridge_dir/wim_glob.c" ".libs/libwim.a" \
+            -Wl,-z,max-page-size=16384 -Wl,--gc-sections -Wl,--no-undefined -pthread \
+            -o "$output_dir/librufus_wim.so"
+    )
+done

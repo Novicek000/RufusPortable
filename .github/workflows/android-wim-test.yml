@@ -1,0 +1,55 @@
+name: Android WIM proxy integration
+
+on:
+  push:
+    branches: [test/android-wim-proxy]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - api: 26
+            arch: x86
+            target: default
+          - api: 35
+            arch: x86_64
+            target: google_apis
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y autoconf automake libtool autotools-dev patch pkg-config libgcrypt20-dev
+          sdkmanager 'ndk;27.2.12479018' 'platforms;android-36' 'build-tools;35.0.0'
+      - name: Build APKs and test native WIM metadata
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018"
+          ./gradlew assembleDebug assembleDebugAndroidTest --max-workers=2
+          bash scripts/test-native-wim.sh
+      - name: Enable runner KVM access
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Test unprivileged Android proxy and native library
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api }}
+          arch: ${{ matrix.arch }}
+          target: ${{ matrix.target }}
+          disable-animations: true
+          script: ./gradlew connectedDebugAndroidTest --max-workers=2
