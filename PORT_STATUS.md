@@ -6,7 +6,7 @@ Celem jest zgodność funkcjonalna z Rufusem z rewizji 8337c3e7e534b5d5b5045dd8e
 
 | Obszar | Stan |
 | --- | --- |
-| USB Bulk-Only / SCSI READ10 i WRITE10 | Istnieje, testy z symulowanym urządzeniem |
+| USB Bulk-Only / SCSI READ10/WRITE10 i READ16/WRITE16 | Istnieje, testy z symulowanym urządzeniem, także adresy ponad 2 TiB |
 | Bezpośredni odczyt dokumentu Androida | Istnieje, bez kopii obrazu w aplikacji |
 | Widoczna nazwa źródła również przy błędzie | Istnieje, testy API 26 i 35 |
 | Zapis DD i SHA-256 zapisanych zakresów | Istnieje |
@@ -16,7 +16,7 @@ Celem jest zgodność funkcjonalna z Rufusem z rewizji 8337c3e7e534b5d5b5045dd8e
 | UEFI:NTFS | Oryginalny obraz Rufusa w zasobach aplikacji; generator GPT/MBR odwzorowuje układ i typy partycji, wypakowywanie i łańcuch UEFI:NTFS zintegrowane, start Windows PE potwierdzony w QEMU |
 | FAT16/FAT32/exFAT | Istnieją podstawowe generatory FAT32/exFAT, potrzebna pełna obsługa drzewa plików i zgodność opcji |
 | UDF, ReFS, ext2/ext3/ext4 jako system docelowy | Do implementacji |
-| READ16/WRITE16, nośniki >2 TiB, UAS, wiele LUN | Do implementacji i testów |
+| UAS, wiele LUN | Do implementacji i testów |
 
 ## Rozruch i instalacja
 
@@ -87,3 +87,7 @@ Podmoduł `third_party/wimlib` jest przypięty do `4a34203cde54c317f0d277a4c64e1
 Przycisk „Obrazy Windows w ISO” odczytuje nazwę, architekturę i numer kompilacji z `sources/install.wim` albo `sources/install.esd`. `ProxyImageFile` przedstawia logiczny plik z ekstentów ISO/UDF jako deskryptor AppFuse Androida. Biblioteka wykonuje odczyt losowy bez pełnej kopii ISO lub WIM w telefonie. Ten etap nie wdraża jeszcze aplikowania obrazu Windows To Go ani modyfikacji WIM.
 
 Na emulatorze Android 8.0 / API 26 (x86) oba testy instrumentacyjne `WimProxyTest` przeszły. Pierwszy odczytuje własny mały WIM z dwóch ekstentów, z których drugi leży za granicą 4 GiB w rzadkim pliku testowym, sprawdza nazwy Unicode, architekturę i kompilację oraz ponawia odczyt. Drugi sprawdza propagowanie błędu uszkodzonego źródła. Test ujawnił ograniczenie AppFuse: ponowne otwarcie wirtualnego inode przez ścieżkę nie działa. Poprawka `0002-android-proxy-descriptor.patch` duplikuje już otwarty deskryptor i zachowuje ścieżkę deskryptora zamiast ponownie otwierać inode. Nie wymaga uprawnień root w aplikacji. Kompilacja czterech ABI, 25 testów Java i lint przeszły. Testy API 26/35 są też zdefiniowane w `.github/workflows/android-wim-test.yml`; samo istnienie workflow nie potwierdza ich wykonania.
+
+## Adresy SCSI 64-bit
+
+`UsbDisk` przechodzi z READ CAPACITY(10) do READ CAPACITY(16), gdy nośnik zwraca granicę 32-bitową. Wybiera READ/WRITE(16), gdy zakres transferu przekracza tę granicę, także jeśli jego początek jeszcze mieści się w 32 bitach. Geometria przekraczająca zakres adresów bajtowych Javy jest odrzucana przed zapisem. Testy emulowanego transportu sprawdzają wysokie adresy, zachowanie sąsiednich bajtów przy niepełnym sektorze, DD z SHA-256 przez granicę LBA oraz przepełnienie pojemności. Wszystkie 28 testów Java i lint przeszły. Nie wykonano próby na fizycznym nośniku powyżej 2 TiB; obsługa adresowania transportu nie potwierdza pełnej zgodności wszystkich generatorów systemów plików z takimi pojemnościami.

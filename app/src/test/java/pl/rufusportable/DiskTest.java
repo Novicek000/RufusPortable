@@ -13,13 +13,17 @@ import static org.mockito.Mockito.*;
 public class DiskTest {
     @Rule public TemporaryFolder files = new TemporaryFolder();
     private final byte[] storage = new byte[512 * 512];
-    private int op, cursor, remaining, tag, writes;
+    private int op, remaining, tag, writes;
+    private long cursor, windowStart, lastLba=storage.length/512-1;
+    private UsbManager manager;
+    private UsbDevice device;
+    private final List<Integer> commands=new ArrayList<>();
     private boolean corrupt;
     private UsbDisk disk;
 
     @Before public void setup() throws Exception {
-        UsbManager manager = mock(UsbManager.class);
-        UsbDevice device = mock(UsbDevice.class);
+        manager = mock(UsbManager.class);
+        device = mock(UsbDevice.class);
         UsbInterface face = mock(UsbInterface.class);
         UsbDeviceConnection link = mock(UsbDeviceConnection.class);
         UsbEndpoint in = mock(UsbEndpoint.class), out = mock(UsbEndpoint.class);
@@ -44,18 +48,25 @@ public class DiskTest {
             if (endpoint == out && remaining == 0) {
                 assertEquals(31,count);
                 assertEquals(0x43425355,b.getInt());
-                tag=b.getInt(); remaining=b.getInt(); op=payload[15];
-                if (op==0x28 || op==0x2a) {
+                tag=b.getInt(); remaining=b.getInt(); op=payload[15]&255; commands.add(op);
+                if (op==0x28 || op==0x2a || op==0x88 || op==0x8a) {
                     b.order(ByteOrder.BIG_ENDIAN);
-                    cursor=b.getInt(17)*512;
-                    assertEquals(remaining,b.getShort(22)*512);
-                    if (op==0x2a) writes++;
+                    boolean extended=op==0x88 || op==0x8a;
+                    assertEquals(extended?16:10,payload[14]);
+                    cursor=(extended?b.getLong(17):Integer.toUnsignedLong(b.getInt(17)))*512;
+                    assertEquals(remaining,(extended?b.getInt(25):Short.toUnsignedInt(b.getShort(22)))*512);
+                    if (op==0x2a || op==0x8a) writes++;
+                }
+                if (op==0x9e) {
+                    assertEquals(16,payload[14]);assertEquals(0x10,payload[16]);
+                    assertEquals(32,b.order(ByteOrder.BIG_ENDIAN).getInt(25));
                 }
             } else if (remaining>0) {
-                if (op==0x25) b.order(ByteOrder.BIG_ENDIAN).putInt(storage.length/512-1).putInt(512);
-                else if (op==0x2a) System.arraycopy(payload,offset,storage,cursor,count);
-                else if (op==0x28) {
-                    System.arraycopy(storage,cursor,payload,offset,count);
+                if (op==0x25) b.order(ByteOrder.BIG_ENDIAN).putInt((int)(lastLba<0?0xffffffffL:Math.min(0xffffffffL,lastLba))).putInt(512);
+                else if (op==0x9e) b.order(ByteOrder.BIG_ENDIAN).putLong(lastLba).putInt(512);
+                else if (op==0x2a || op==0x8a) System.arraycopy(payload,offset,storage,Math.toIntExact(cursor-windowStart),count);
+                else if (op==0x28 || op==0x88) {
+                    System.arraycopy(storage,Math.toIntExact(cursor-windowStart),payload,offset,count);
                     if (corrupt) payload[offset]^=1;
                 } else fail("unexpected data command");
                 cursor+=count; remaining-=count;
@@ -112,6 +123,40 @@ public class DiskTest {
         assertThrows(IOException.class,()->partition.write(-1,new byte[2]));
         assertThrows(IOException.class,()->partition.read(Long.MAX_VALUE,new byte[2]));
         assertThrows(IOException.class,()->disk.partition(Long.MAX_VALUE,512));
+        assertEquals(0,writes);
+    }
+    private void largeDisk(long start) throws Exception {
+        lastLba=0x100001000L;
+        windowStart=start*512;
+        disk.close();
+        disk=new UsbDisk(manager,device);
+        assertEquals((lastLba+1)*512,disk.capacity);
+        assertTrue(commands.contains(0x9e));
+    }
+    @Test public void largeDeviceUses64BitAddressesAndPreservesUnalignedNeighbours() throws Exception {
+        largeDisk(0x100000000L);
+        Arrays.fill(storage,(byte)87);
+        BlockDevice partition=disk.partition(windowStart,storage.length);
+        byte[] data=new byte[30007];new Random(3).nextBytes(data);
+        partition.write(513,data);
+        byte[] actual=new byte[data.length];partition.read(513,actual);
+        assertArrayEquals(data,actual);
+        assertEquals(87,storage[512]);assertEquals(87,storage[513+data.length]);
+        assertTrue(commands.contains(0x88));assertTrue(commands.contains(0x8a));
+    }
+    @Test public void ddVerificationCrosses32BitLbaBoundaryWithoutWrapping() throws Exception {
+        largeDisk(0xffffffffL);
+        byte[] data=new byte[1024];new Random(7).nextBytes(data);
+        DiskLayout layout=new DiskLayout();layout.add(windowStart,data);
+        disk.flash(layout,(v,n)->{},true);
+        assertArrayEquals(data,Arrays.copyOf(storage,data.length));
+        assertTrue(commands.contains(0x88));assertTrue(commands.contains(0x8a));
+    }
+    @Test public void capacityOverflowIsRejectedBeforeAnyWrite() {
+        lastLba=Long.MAX_VALUE;
+        assertThrows(IOException.class,()->new UsbDisk(manager,device));
+        lastLba=-1; // Unsigned READ CAPACITY(16) result outside Java address range.
+        assertThrows(IOException.class,()->new UsbDisk(manager,device));
         assertEquals(0,writes);
     }
     @Test public void comparesReleaseComponentsNumerically() {

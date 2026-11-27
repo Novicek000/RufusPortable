@@ -6,7 +6,7 @@ import java.nio.*;
 import java.security.MessageDigest;
 import java.util.Arrays;
 
-/** USB Mass Storage Bulk-Only Transport, transparent SCSI, logical unit zero. */
+/** USB Mass Storage Bulk-Only Transport, transparent SCSI with 64-bit block addresses, logical unit zero. */
 final class UsbDisk implements Closeable {
     interface Progress { void moved(boolean verifying, long bytes) throws IOException; }
     private final UsbDeviceConnection connection;
@@ -48,9 +48,22 @@ final class UsbDisk implements Closeable {
             }
             ByteBuffer info = ByteBuffer.wrap(geometry);
             long last = Integer.toUnsignedLong(info.getInt());
-            blockSize = info.getInt();
-            if (last == 0xffffffffL || blockSize < 512 || blockSize > 16384 || Integer.bitCount(blockSize) != 1)
+            int sector = info.getInt();
+            if (last == 0xffffffffL) {
+                byte[] extended = new byte[32];
+                byte[] capacity16 = new byte[16];
+                capacity16[0] = (byte)0x9e;
+                capacity16[1] = 0x10;
+                ByteBuffer.wrap(capacity16).putInt(10, extended.length);
+                command(capacity16, extended, extended.length, true);
+                info = ByteBuffer.wrap(extended);
+                last = info.getLong();
+                sector = info.getInt();
+            }
+            if (last < 0 || sector < 512 || sector > 16384 || Integer.bitCount(sector) != 1
+                    || last >= Long.MAX_VALUE / sector)
                 throw new IOException("Nieobsługiwany rozmiar lub geometria nośnika.");
+            blockSize = sector;
             capacity = (last + 1) * blockSize;
         } catch (IOException | RuntimeException e) {
             close();
@@ -106,10 +119,8 @@ final class UsbDisk implements Closeable {
                             Arrays.fill(data,bytes,blocks*blockSize,(byte)0);
                             if (verifyAfterWrite) original.update(data,0,blocks*blockSize);
                         }
-                        ByteBuffer cdb=ByteBuffer.allocate(10);
-                        cdb.put((byte)(verify?0x28:0x2A)).put((byte)0)
-                           .putInt((int)((range.offset+pos)/blockSize)).put((byte)0).putShort((short)blocks);
-                        command(cdb.array(),data,blocks*blockSize,verify);
+                        command(blockCommand(verify,(range.offset+pos)/blockSize,blocks),
+                                data,blocks*blockSize,verify);
                         if (verify) actual.update(data,0,blocks*blockSize);
                         pos+=bytes;
                     }
@@ -158,20 +169,28 @@ final class UsbDisk implements Closeable {
             int blocks=(prefix+count+blockSize-1)/blockSize;
             byte[] transfer=new byte[blocks*blockSize];
             if (!writing || prefix!=0 || count!=transfer.length) {
-                ByteBuffer cdb=ByteBuffer.allocate(10);
-                cdb.put((byte)0x28).put((byte)0).putInt((int)(aligned/blockSize))
-                        .put((byte)0).putShort((short)blocks);
-                command(cdb.array(),transfer,transfer.length,true);
+                command(blockCommand(true,aligned/blockSize,blocks),transfer,transfer.length,true);
             }
             if (writing) {
                 System.arraycopy(bytes,done,transfer,prefix,count);
-                ByteBuffer cdb=ByteBuffer.allocate(10);
-                cdb.put((byte)0x2a).put((byte)0).putInt((int)(aligned/blockSize))
-                        .put((byte)0).putShort((short)blocks);
-                command(cdb.array(),transfer,transfer.length,false);
+                command(blockCommand(false,aligned/blockSize,blocks),transfer,transfer.length,false);
             } else System.arraycopy(transfer,prefix,bytes,done,count);
             done+=count; offset+=count;
         }
+    }
+
+    private static byte[] blockCommand(boolean reading,long lba,int blocks) throws IOException {
+        if (lba < 0 || blocks <= 0 || lba > Long.MAX_VALUE - (blocks - 1))
+            throw new IOException("Nieprawidłowy zakres bloków SCSI.");
+        if (blocks <= 0xffff && lba + blocks - 1 <= 0xffffffffL) {
+            ByteBuffer command=ByteBuffer.allocate(10);
+            command.put((byte)(reading?0x28:0x2a)).put((byte)0)
+                    .putInt((int)lba).put((byte)0).putShort((short)blocks);
+            return command.array();
+        }
+        ByteBuffer command=ByteBuffer.allocate(16);
+        command.put((byte)(reading?0x88:0x8a)).put((byte)0).putLong(lba).putInt(blocks);
+        return command.array();
     }
 
     public synchronized void close() {
