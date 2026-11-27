@@ -32,7 +32,7 @@ Celem jest zgodność funkcjonalna z Rufusem z rewizji 8337c3e7e534b5d5b5045dd8e
 | Trwała przestrzeń Live Linux | Do implementacji |
 | Pobieranie ISO, bootloaderów i danych DBX/SBAT | Do implementacji |
 | Pełne opcje etykiet, klastrów, GPT/MBR, BIOS/UEFI, stare BIOS | Do porównania i uzupełnienia |
-| Weryfikacja uszkodzonych bloków z wzorcami i liczbą przebiegów Rufusa | Istnieje jedynie podstawowy test zerowania i odczytu |
+| Weryfikacja uszkodzonych bloków z wzorcami i liczbą przebiegów Rufusa | Zaimplementowane wzorce, identyfikatory bloków, raportowanie i ponawianie; testy symulowanych błędów, próby sprzętowe i eksport raportu do uzupełnienia |
 | Tworzenie i odczyt VHD/VHDX oraz obrazów skompresowanych | Do implementacji |
 | Logi, diagnostyka, zapisywanie obrazu urządzenia | Do implementacji |
 | Sprawdzanie aktualizacji repozytorium Androida | Istnieje |
@@ -96,3 +96,13 @@ Na emulatorze Android 8.0 / API 26 (x86) oba testy instrumentacyjne `WimProxyTes
 ## Jednostki logiczne USB
 
 Po przyznaniu dostępu aplikacja odczytuje GET_MAX_LUN. Dla wielojednostkowych czytników pokazuje wybór jednostki, a wybraną LUN podaje w metadanych nośnika i potwierdzeniu zapisu. Wszystkie CBW, w tym sprawdzenie pojemności, odczyt, zapis i synchronizacja, zawierają tę LUN. Brak obsługi GET_MAX_LUN (stall) pozostawia jednostkę 0 zgodnie z Bulk-Only. Nieprawidłowa lub niedostępna jednostka jest odrzucana przed komendami SCSI. Testy symulują czterojednostkowy czytnik, wybór LUN 2, zniknięcie jednostki, błędną odpowiedź i stall. Wszystkie 31 testów Java, lint i budowanie APK przeszły; nie wykonano testu fizycznego czytnika z wieloma LUN.
+
+## Potwierdzenie WIM w Android CI
+
+[GitHub Actions 46027043283](https://github.com/Novicek000/RufusPortable/actions/runs/46027043283), rewizja c3dec7c: oba zadania zakończyły się sukcesem. Na API 26 / x86 i API 35 / x86_64 przeszły po dwa testy Androida, w tym odczyt ekstentu powyżej 4 GiB. Na runnerach przeszły też kompilacja APK z czterema ABI, testy Java, lint oraz testy hostowe WIM. Ten wynik dotyczy rewizji c3dec7c; późniejsze funkcje mają osobno opisane testy.
+
+## Test uszkodzonych bloków
+
+`BadBlocks` zastępuje zerowanie sekwencjami z badblocks.c/rufus.h: jeden przebieg 0x55, dwa 0x55/0xaa, cztery SLC 0x00/0xff/0x55/0xaa, MLC 0x00/0xff/0x33/0xcc lub TLC 0x00/0xff/0x1c71c7/0xe38e38. Identyfikatory 64-bit w pierwszym przebiegu pozwalają wykryć aliasowanie pojemności. Tak jak źródło test używa bloków 512 KiB, pomija końcową niepełną jednostkę i kończy przy 256 uszkodzonych blokach. Bufory grupują do 64 bloków, z ograniczeniem pamięci stosownym do sterty Androida. Nieudany transfer grupy jest ponawiany osobno dla każdego bloku, błędy zapisu/odczytu/różnic są klasyfikowane i deduplikowane.
+
+Opcje pozwalają wybrać zestaw przebiegów i wykrywanie fałszywej pojemności. Wynik z błędami daje wybór ponowienia testu, kontynuacji lub przerwania. Anulowanie operacji przerywa także zadanie wykonawcze. Testy obejmują wszystkie zestawy, wzorzec TLC, fałszywą pojemność, odzyskanie po błędzie grupowego transferu, błędy trwałe, deduplikację, limit i anulowanie. Testy UI API 26/35 sprawdzają zachowanie ustawień po odtworzeniu Activity. Eksport listy bloków i diagnostyka fizycznych awarii USB pozostają do uzupełnienia.

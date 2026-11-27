@@ -38,7 +38,8 @@ public class MainActivity extends AppCompatActivity {
     private String installed, newTag;
     private MaterialButton settings, hash, other, wimInfo;
     private boolean gpt, verifyWrite=true, useIso, testMedia, dos;
-    private int ntfsClusterSize=4096;
+    private int ntfsClusterSize=4096, badBlockOption;
+    private boolean detectFakeMedia=true;
     private boolean quickFormat=true;
     private String volumeLabel="RUFUS";
     private Uri pickedUri;
@@ -78,6 +79,7 @@ public class MainActivity extends AppCompatActivity {
             ntfsClusterSize=state.getInt("ntfsCluster",4096); quickFormat=state.getBoolean("quick",true); volumeLabel=state.getString("label","RUFUS");
             String saved=state.getString("source");
             testMedia=state.getBoolean("testMedia");
+            badBlockOption=state.getInt("badBlockOption",0); detectFakeMedia=state.getBoolean("detectFakes",true);
             if (saved!=null) select(Uri.parse(saved),state.getBoolean("iso"));
             else if (state.getBoolean("builtin")) builtin(state.getBoolean("dos"));
         }
@@ -88,6 +90,7 @@ public class MainActivity extends AppCompatActivity {
         if (pickedUri!=null) state.putString("source",pickedUri.toString());
         state.putBoolean("builtin",image!=null && image.uri==null); state.putBoolean("dos",dos); state.putBoolean("testMedia",testMedia);
         state.putBoolean("iso",useIso); state.putBoolean("gpt",gpt); state.putBoolean("verify",verifyWrite);
+        state.putInt("badBlockOption",badBlockOption);state.putBoolean("detectFakes",detectFakeMedia);
         state.putInt("ntfsCluster",ntfsClusterSize); state.putBoolean("quick",quickFormat); state.putString("label",volumeLabel);
     }
 
@@ -267,8 +270,14 @@ public class MainActivity extends AppCompatActivity {
             }
         });
         CheckBox verify=new CheckBox(this); verify.setText("Sprawdź zapis przez SHA-256"); verify.setChecked(verifyWrite); box.addView(verify);
-        CheckBox surface=new CheckBox(this); surface.setText("Test bloków przed zapisem (pełny zapis i odczyt nośnika)");
+        CheckBox surface=new CheckBox(this); surface.setText("Test uszkodzonych bloków przed zapisem");
         surface.setChecked(testMedia); box.addView(surface);
+        LinearLayout testBox=column();box.addView(testBox);
+        Spinner patterns=choices(testBox,"Przebiegi testu",BadBlocks.OPTIONS,badBlockOption);
+        CheckBox fakes=new CheckBox(this);fakes.setText("Wykrywaj fałszywą pojemność");
+        fakes.setChecked(detectFakeMedia);testBox.addView(fakes);
+        testBox.setVisibility(testMedia?View.VISIBLE:View.GONE);
+        surface.setOnCheckedChangeListener((view,checked)->testBox.setVisibility(checked?View.VISIBLE:View.GONE));
         ScrollView scroll=new ScrollView(this); scroll.addView(box);
         var dialog=new MaterialAlertDialogBuilder(this).setTitle("Opcje zapisu").setView(scroll)
                 .setNegativeButton("Anuluj",null).setPositiveButton("Zastosuj",null).show();
@@ -278,6 +287,7 @@ public class MainActivity extends AppCompatActivity {
             if (iso && !WindowsInstaller.validLabel(label)) { volume.setError("Etykieta NTFS może mieć do 32 znaków."); return; }
             if (image.uri==null && !label.matches("[a-zA-Z0-9 _-]{1,11}")) {volume.setError("Wpisz do 11 liter ASCII, cyfr, spacji, - lub _."); return;}
             useIso=iso; if (iso || image.uri==null) volumeLabel=label; testMedia=surface.isChecked();
+            badBlockOption=patterns.getSelectedItemPosition();detectFakeMedia=fakes.isChecked();
             gpt=scheme.getSelectedItemPosition()==1; ntfsClusterSize=clusterSizes[clusters.getSelectedItemPosition()]; quickFormat=quick.isChecked();
             verifyWrite=verify.isChecked(); showImage(); dialog.dismiss();
         });
@@ -401,7 +411,7 @@ public class MainActivity extends AppCompatActivity {
         if (flashing) {
             new MaterialAlertDialogBuilder(this).setTitle("Przerwać operację?")
                     .setMessage("Na nośniku może pozostać niepełny obraz.").setNegativeButton("Kontynuuj",null)
-                    .setPositiveButton("Przerwij",(d,w)->{cancel=true; refresh();}).show(); return;
+                    .setPositiveButton("Przerwij",(d,w)->{cancel=true;if(preparation!=null)preparation.cancel(true);refresh();}).show(); return;
         }
         if (image==null || target==null) return;
         if (image.length<0) {
@@ -421,7 +431,7 @@ public class MainActivity extends AppCompatActivity {
         int selectedLun=targetLun;
         String method=image.uri==null?"MBR · FAT32 · "+volumeLabel:
                 useIso?(gpt?"GPT":"MBR")+" · NTFS · "+volumeLabel:"Zapis sektorowy DD";
-        String confirmation="\n\n"+method+(testMedia?"\nPełny test zapisu i odczytu całego nośnika.":"")
+        String confirmation="\n\n"+method+(testMedia?"\nTest bloków: "+BadBlocks.OPTIONS[badBlockOption]+(detectFakeMedia?" · wykrywanie fałszywej pojemności":""):"")
                 +"\nZapis zastąpi dane na tym nośniku."
                 +(image.uri!=null?" Plik źródłowy musi znajdować się poza wybranym pendrivem.":"")
                 +" Pozostaw aplikację otwartą do zakończenia operacji.";
@@ -435,7 +445,7 @@ public class MainActivity extends AppCompatActivity {
         status.setText("Rozpoczynanie zapisu…");
         ImageFile input=image;
         long expectedCapacity=capacity;
-        diskWork.execute(()->{
+        preparation=diskWork.submit(()->{
             try (InputStream accessible=input.uri==null?null:input.open(this);
                  UsbDisk disk=new UsbDisk(usb,selected,selectedLun)) {
                 if (accessible!=null) {
@@ -462,14 +472,23 @@ public class MainActivity extends AppCompatActivity {
                 else {layout=new DiskLayout(); layout.add(0,input.length,source);}
                 layout.validate(disk.capacity,disk.blockSize);
                 if (testMedia) {
-                    DiskLayout test=new DiskLayout();
-                    test.add(0,disk.capacity,()->new ExFat.Padded(new byte[0],disk.capacity));
-                    disk.flash(test,(reading,bytes)->{
-                        if (cancel || Thread.currentThread().isInterrupted()) throw new InterruptedIOException("Przerwano test bloków.");
-                        int percent=(int)(100.0*bytes/disk.capacity);
-                        if (bytes%Math.max(131072,(disk.capacity/200/131072)*131072)==0)
-                            ui(()->{status.setText((reading?"Odczyt testowy":"Zerowanie testowe")+" · "+percent+"%");progress.setProgressCompat(percent,false);});
-                    },true);
+                    boolean repeat;
+                    do {
+                        final int[] lastTestStep={-1};
+                        BadBlocks.Report report=BadBlocks.run(disk.partition(0,disk.capacity),badBlockOption,detectFakeMedia,
+                                (pass,passes,reading,bytes,total)->{
+                                    if (cancel || Thread.currentThread().isInterrupted()) throw new InterruptedIOException("Przerwano test bloków.");
+                                    int percent=(int)(100.0*bytes/total);
+                                    int step=(pass*2+(reading?1:0))*101+percent;
+                                    if(lastTestStep[0]!=step) {
+                                        lastTestStep[0]=step;
+                                        ui(()->{status.setText("Test bloków · "+pass+"/"+passes+" · "+(reading?"odczyt":"zapis")+" · "+percent+"%");progress.setProgressCompat(percent,false);});
+                                    }
+                                });
+                        int choice=report.failures.isEmpty()?2:badBlockDecision(report);
+                        if(choice==0) throw new InterruptedIOException("Przerwano zapis po teście bloków.");
+                        repeat=choice==1;
+                    } while(repeat);
                 }
                 final int[] last={-1};
                 disk.flash(layout,(verify,bytes)->{
@@ -513,6 +532,28 @@ public class MainActivity extends AppCompatActivity {
                 });
             } catch (Exception e) { error(e); }
         });
+    }
+    private int badBlockDecision(BadBlocks.Report report) throws Exception {
+        CompletableFuture<Integer> answer=new CompletableFuture<>();
+        String message="Uszkodzone bloki: "+report.failures.size()+" (512 KiB każdy)"
+                +"\nBłędy zapisu: "+report.count(BadBlocks.Failure.WRITE)
+                +"\nBłędy odczytu: "+report.count(BadBlocks.Failure.READ)
+                +"\nRóżnice danych: "+report.count(BadBlocks.Failure.CORRUPTION)
+                +(report.complete?"":"\nTest zatrzymano po 256 uszkodzonych blokach.");
+        ui(()->new MaterialAlertDialogBuilder(this).setTitle("Nośnik nie przeszedł testu")
+                .setMessage(message).setPositiveButton("Powtórz test",(dialog,which)->answer.complete(1))
+                .setNeutralButton("Kontynuuj mimo błędów",(dialog,which)->answer.complete(2))
+                .setNegativeButton("Przerwij",(dialog,which)->answer.complete(0))
+                .setOnCancelListener(dialog->answer.complete(0)).show());
+        for(;;) {
+            if(cancel || Thread.currentThread().isInterrupted()) throw new InterruptedIOException("Przerwano test bloków.");
+            try {return answer.get(250,TimeUnit.MILLISECONDS);}
+            catch(TimeoutException waiting) { /* Check cancellation while the dialog is open. */ }
+            catch(InterruptedException cancelled) {
+                Thread.currentThread().interrupt();
+                throw new InterruptedIOException("Przerwano test bloków.");
+            }
+        }
     }
     private byte[] bootResource(String name) throws IOException {
         try (InputStream input=getAssets().open("rufus/"+name);

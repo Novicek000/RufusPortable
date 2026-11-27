@@ -62,6 +62,36 @@ public class StartScreenTest {
             }
         }
     }
+    @Test public void badBlockOptionsRemainSelectedAfterActivityRecreation() {
+        Shadows.shadowOf(RuntimeEnvironment.getApplication()).grantPermissions(
+                "pl.rufusportable.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION");
+        try (var controller=Robolectric.buildActivity(MainActivity.class).setup()) {
+            View root=controller.get().getWindow().getDecorView();
+            find(root,"Inne opcje rozruchu").performClick();
+            androidx.appcompat.app.AlertDialog boot=(androidx.appcompat.app.AlertDialog)
+                    org.robolectric.shadows.ShadowDialog.getLatestDialog();
+            boot.getListView().performItemClick(null,1,1);
+            find(root,"Opcje zapisu").performClick();
+            androidx.appcompat.app.AlertDialog options=(androidx.appcompat.app.AlertDialog)
+                    org.robolectric.shadows.ShadowDialog.getLatestDialog();
+            View dialogRoot=options.getWindow().getDecorView();
+            ((android.widget.CheckBox)find(dialogRoot,"Test uszkodzonych bloków przed zapisem")).performClick();
+            TextView caption=(TextView)find(dialogRoot,"Przebiegi testu");
+            android.widget.Spinner patterns=dialogRoot.findViewById(caption.getLabelFor());
+            assertEquals(View.VISIBLE,((View)caption.getParent()).getVisibility());
+            patterns.setSelection(4);
+            ((android.widget.CheckBox)find(dialogRoot,"Wykrywaj fałszywą pojemność")).setChecked(false);
+            options.getButton(-1).performClick();
+            controller.recreate();
+            find(controller.get().getWindow().getDecorView(),"Opcje zapisu").performClick();
+            options=(androidx.appcompat.app.AlertDialog)org.robolectric.shadows.ShadowDialog.getLatestDialog();
+            dialogRoot=options.getWindow().getDecorView();
+            assertTrue(((android.widget.CheckBox)find(dialogRoot,"Test uszkodzonych bloków przed zapisem")).isChecked());
+            assertFalse(((android.widget.CheckBox)find(dialogRoot,"Wykrywaj fałszywą pojemność")).isChecked());
+            caption=(TextView)find(dialogRoot,"Przebiegi testu");
+            assertEquals(4,((android.widget.Spinner)dialogRoot.findViewById(caption.getLabelFor())).getSelectedItemPosition());
+        }
+    }
     @Test public void startsWithWriteDisabledAndOpensDocumentPicker() {
         // Android grants the app its own manifest-declared signature permission at install.
         Shadows.shadowOf(RuntimeEnvironment.getApplication()).grantPermissions(
