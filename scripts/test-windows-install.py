@@ -14,7 +14,7 @@ def main():
     parser.add_argument("media", type=pathlib.Path)
     parser.add_argument("target", type=pathlib.Path)
     parser.add_argument("output", type=pathlib.Path)
-    parser.add_argument("--timeout", type=int, default=2700)
+    parser.add_argument("--timeout", type=int, default=7200)
     parser.add_argument("--firmware", type=pathlib.Path, default=pathlib.Path("/usr/share/OVMF"))
     args = parser.parse_args()
     if not args.media.is_file() or args.media.resolve() == args.target.resolve():
@@ -33,7 +33,7 @@ def main():
                "-drive", f"if=pflash,format=raw,readonly=on,file={code}",
                "-drive", f"if=pflash,format=raw,file={variables.resolve()}",
                "-drive", f"if=none,id=target,format=raw,cache=writeback,discard=unmap,detect-zeroes=unmap,file={args.target.resolve()}",
-               "-device", "ide-hd,drive=target,bus=ide.0,bootindex=2",
+               "-device", "ide-hd,drive=target,bus=ide.0,rotation_rate=1,bootindex=2",
                "-device", "qemu-xhci,id=xhci",
                "-drive", f"if=none,id=install,format=raw,cache=writeback,file={args.media.resolve()}",
                "-device", "usb-storage,id=installusb,drive=install,bus=xhci.0,removable=on,bootindex=1",
@@ -88,8 +88,21 @@ def main():
                 if elapsed >= next_capture:
                     capture += 1
                     execute("screendump", {"filename": str(args.output.resolve() / f"screen-{capture:02}.ppm")})
+                    snapshot = {
+                        "elapsed_seconds": elapsed,
+                        "block_stats": execute("query-blockstats"),
+                        "block_devices": execute("query-block"),
+                        "cpus": execute("query-cpus-fast"),
+                        "host_process_stat": pathlib.Path(f"/proc/{process.pid}/stat").read_text(),
+                        "host_process_io": pathlib.Path(f"/proc/{process.pid}/io").read_text(),
+                        "host_disk_free_bytes": shutil.disk_usage(args.target.parent).free,
+                        "target_allocated_bytes": args.target.stat().st_blocks * 512,
+                    }
+                    (args.output / f"activity-{capture:02}.json").write_text(json.dumps(snapshot, indent=2))
+                    activity = [{"device": item.get("device"), "read_bytes": item["stats"].get("rd_bytes"),
+                                 "written_bytes": item["stats"].get("wr_bytes")} for item in snapshot["block_stats"]]
                     next_capture = elapsed + 120
-                    print(f"Windows installation running: {elapsed:.0f}s", flush=True)
+                    print(f"Windows installation running: {elapsed:.0f}s; disk activity: {json.dumps(activity)}", flush=True)
                 try:
                     execute("query-status")
                 except (EOFError, ConnectionError):
