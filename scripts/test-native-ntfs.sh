@@ -7,23 +7,7 @@ source_dir="$native_root/source/ntfs-3g"
 build_dir="$native_root/host"
 test_dir="$build_dir/tests"
 mkdir -p "$test_dir"
-if [[ ! -f "$source_dir/configure" ]]; then
-    mkdir -p "$source_dir"
-    cp -R "$project_dir/third_party/ntfs-3g/." "$source_dir/"
-    (cd "$source_dir" && autoreconf -fi)
-fi
-for source_patch in "$project_dir/scripts/patches/ntfs-3g/"*.patch; do
-    if ! patch --directory="$source_dir" --strip=1 --reverse --dry-run --silent --force < "$source_patch" >/dev/null 2>&1; then
-        patch --directory="$source_dir" --strip=1 --forward --batch < "$source_patch"
-    fi
-done
-(
-    cd "$build_dir"
-    CC="${HOST_CC:-gcc}" CFLAGS="-std=gnu11 -O2 -fPIC" "$source_dir/configure" \
-        --disable-ntfs-3g --disable-ntfsprogs --disable-crypto \
-        --disable-device-default-io-ops --enable-static --disable-shared
-    make -j"${BUILD_JOBS:-2}" -C libntfs-3g
-)
+bash "$project_dir/scripts/build-host-ntfs.sh"
 bridge_dir="$project_dir/app/src/main/cpp"
 tests_dir="$project_dir/app/src/test/native"
 library="$build_dir/libntfs-3g/.libs/libntfs-3g.a"
@@ -33,7 +17,7 @@ format_sources=("$bridge_dir/ntfs_format.c" "$source_dir/ntfsprogs/attrdef.c"
     "$source_dir/ntfsprogs/boot.c" "$source_dir/ntfsprogs/sd.c" "$source_dir/ntfsprogs/utils.c")
 compile_options=(-std=gnu11 -fPIC -fvisibility=hidden -ffunction-sections -fdata-sections -O2
     -Wall -Wextra -Werror -Wno-address-of-packed-member -Wno-unused-but-set-variable)
-link_options=(-Wl,--gc-sections -Wl,--no-undefined -pthread)
+link_options=(-Wl,--exclude-libs,ALL -Wl,--gc-sections -Wl,--no-undefined -pthread)
 "${HOST_CC:-gcc}" "${compile_options[@]}" "${includes[@]}" \
     "$bridge_dir/ntfs_bridge.c" "$tests_dir/ntfs_bridge_test.c" "${format_sources[@]}" "$library" "${link_options[@]}" \
     -o "$test_dir/ntfs-bridge-test"

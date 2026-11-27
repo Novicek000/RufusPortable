@@ -22,6 +22,8 @@ int rufus_ntfs_format(rufus_disk *disk, const char *label, int cluster_size,
         int64_t partition_start_sector, int quick);
 int rufus_ntfs_bind_formatter(rufus_disk *disk);
 rufus_ntfs *rufus_ntfs_mount(rufus_disk *disk);
+/* Borrowed native volume, valid only until unmount. */
+void *rufus_ntfs_native_volume(rufus_ntfs *volume);
 int rufus_ntfs_mkdir(rufus_ntfs *volume, const uint16_t *path, size_t length);
 rufus_ntfs_file *rufus_ntfs_create(rufus_ntfs *volume, const uint16_t *path, size_t length);
 rufus_ntfs_file *rufus_ntfs_open(rufus_ntfs *volume, const uint16_t *path, size_t length);

@@ -1,6 +1,6 @@
 # RufusPortable na Androida
 
-Polskojęzyczna aplikacja do przygotowywania pendrive’ów przez USB OTG, dla Androida 8.0 i nowszego. Działa bez roota. Potrzebne są USB Host oraz nośnik USB Mass Storage w trybie Bulk-Only Transport z SCSI (LUN 0).
+Polskojęzyczna aplikacja do przygotowywania pendrive’ów przez USB OTG, dla Androida 8.0 i nowszego. Działa bez roota. Potrzebne są USB Host oraz nośnik USB Mass Storage w trybie Bulk-Only Transport z SCSI. Czytniki z wieloma jednostkami pozwalają wybrać LUN.
 
 Ta gałąź zawiera rozwijany natywny port. Nowa ścieżka instalatora Windows nie została jeszcze opublikowana jako stabilne wydanie. Aktualny release 1.1.0 pochodzi z wcześniejszej implementacji. [Stan prac i pozostałe funkcje](PORT_STATUS.md).
 
@@ -21,12 +21,12 @@ Podczas zapisu aplikacja kopiuje pliki bezpośrednio z wybranego obrazu porcjami
 | DD | Zapis IMG, RAW, BIN, DD i hybrydowych ISO. Dla hybrydowego ISO metodę można zmienić w opcjach |
 | FreeDOS 1.4 | Rozruch BIOS, MBR, FAT32, FreeCOM i jądro FreeDOS z zasobów Rufusa |
 | Pusty FAT32 | Szybkie formatowanie MBR/FAT32 z własną etykietą |
-| Kontrola | SHA-256 źródła, opcjonalna weryfikacja zapisu, opcjonalny pełny test bloków (jedno zerowanie i sprawdzenie odczytu), anulowanie operacji |
+| Kontrola | SHA-256 źródła, opcjonalna weryfikacja zapisu, test uszkodzonych bloków z zestawami wzorców Rufusa i wykrywaniem fałszywej pojemności, anulowanie operacji |
 | Aktualizacje | Automatyczne i ręczne sprawdzanie stabilnych wydań z tego repozytorium |
 
-Po przerwaniu zapisu ponów operację. Test bloków zajmuje czas proporcjonalny do całej pojemności nośnika. Tryby ISO, FAT32 i FreeDOS wymagają sektorów logicznych 512 B. Tryb DD obsługuje sektory od 512 B do 16 KiB i adresowanie SCSI READ/WRITE(10).
+Po przerwaniu zapisu ponów operację. Test bloków zajmuje czas proporcjonalny do całej pojemności nośnika. Tryby ISO, FAT32 i FreeDOS wymagają sektorów logicznych 512 B. Tryb DD obsługuje sektory od 512 B do 16 KiB i adresowanie SCSI READ/WRITE(10) oraz READ/WRITE(16).
 
-Windows To Go, konfiguracja odpowiedzi instalatora Windows, wypakowywanie instalacyjnych ISO Linux i trwałe partycje Live Linux oczekują na implementację. Bieżąca gałąź wymaga dalszej weryfikacji przed stabilnym wydaniem.
+Trwa praca nad Windows To Go, wypakowywaniem instalacyjnych ISO Linux i trwałymi partycjami Live Linux. Bieżąca gałąź wymaga dalszej weryfikacji przed stabilnym wydaniem.
 
 ## Budowanie
 
@@ -52,4 +52,4 @@ Test uszkodzonych bloków korzysta z zestawów wzorców i identyfikatorów blok�
 
 Generator plików odpowiedzi Windows pochodzi z funkcji CreateUnattendXml w `third_party/rufus/src/wue.c` (© 2022–2026 Pete Batard, GPL-3.0+). Wrappery setup w zasobach są oryginalnymi plikami Rufusa; ich opis i sumy SHA-256 znajdują się w [setup-readme.txt](app/src/main/assets/rufus/setup-readme.txt). Pełne źródło referencyjne jest przypięte w [third_party/rufus](third_party/rufus).
 
-W gałęzi portu opcje „Instalacja Windows” trafiają do ścieżki OEM albo do boot.wim na nośniku. Obsługiwane są ustawienia konta, prywatności, regionu, BitLockera, pomijania wymagań Windows 11 i usprawnień Rufusa. Zaawansowane opcje CA 2023, SkuSiPolicy, silent install i Windows To Go nadal wymagają uzupełnienia. Mapowanie stref Android/IANA na Windows pochodzi z Unicode CLDR 47; [licencja Unicode](app/src/main/assets/windows/unicode-license.txt).
+W gałęzi portu opcje „Instalacja Windows” trafiają do ścieżki OEM albo do boot.wim na nośniku. Obsługiwane są ustawienia konta, prywatności, regionu, BitLockera, pomijania wymagań Windows 11 i usprawnień Rufusa. Podłączone są również wybór edycji i instalacja bezobsługowa, podmiana bootloaderów CA 2023, SkuSiPolicy i tryb S. Pełna próba instalacji z personalizacją jest odrębnie weryfikowana w CI. Windows To Go nadal wymaga konfiguracji rozruchu i integracji trybu. Mapowanie stref Android/IANA na Windows pochodzi z Unicode CLDR 47; [licencja Unicode](app/src/main/assets/windows/unicode-license.txt).

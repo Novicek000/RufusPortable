@@ -72,6 +72,12 @@ final class WimMetadata {
             throw new IOException("Nieprawidłowe parametry wypakowania WIM.");
         extract(path,image,target.getBytes(StandardCharsets.UTF_8),directory.getBytes(StandardCharsets.UTF_8));
     }
+    interface ApplyProgress {void update(long done,long total,long files,long totalFiles) throws IOException;}
+    static void apply(String path,int image,BlockDevice target,ApplyProgress progress) throws IOException {
+        if(image<1 || target==null || progress==null)throw new IOException("Nieprawidłowe parametry aplikowania Windows.");
+        applyImage(path,image,target,target.size(),target.sectorSize(),progress);
+    }
+    private static native void applyImage(String path,int image,BlockDevice target,long size,int sector,ApplyProgress progress) throws IOException;
     static native long compact(String path,int image) throws IOException;
     static native void requireEditable(String path) throws IOException;
     static void verify(String path) throws IOException {verifyWim(path);}

@@ -33,6 +33,7 @@ def nativeNtfs = tasks.register('buildNativeNtfs', Exec) {
             new File(System.getenv('ANDROID_HOME') ?: '', 'ndk/27.2.12479018').absolutePath
     inputs.file rootProject.file('scripts/build-ntfs.sh')
     inputs.dir rootProject.file('scripts/patches/ntfs-3g')
+    inputs.file file('src/main/cpp/jni_disk.h')
     inputs.files file('src/main/cpp/ntfs_bridge.c'), file('src/main/cpp/ntfs_bridge.h'), file('src/main/cpp/ntfs_jni.c'), file('src/main/cpp/ntfs_format.c')
     inputs.dir rootProject.file('third_party/ntfs-3g')
     outputs.files(['arm64-v8a', 'armeabi-v7a', 'x86_64', 'x86'].collect {
@@ -42,6 +43,7 @@ def nativeNtfs = tasks.register('buildNativeNtfs', Exec) {
 tasks.named('preBuild').configure { dependsOn nativeNtfs }
 
 def nativeWim = tasks.register('buildNativeWim', Exec) {
+    dependsOn nativeNtfs
     workingDir rootProject.projectDir
     commandLine 'bash', 'scripts/build-wim.sh', 'arm64-v8a', 'armeabi-v7a', 'x86_64', 'x86'
     environment 'ANDROID_NDK_HOME', System.getenv('ANDROID_NDK_HOME') ?:
@@ -49,6 +51,8 @@ def nativeWim = tasks.register('buildNativeWim', Exec) {
     inputs.file rootProject.file('scripts/build-wim.sh')
     inputs.dir rootProject.file('scripts/patches/wimlib')
     inputs.files file('src/main/cpp/wim_jni.c'), file('src/main/cpp/wim_glob.c'), file('src/main/cpp/wim_glob.h'), file('src/main/cpp/wim_proxy.h'), file('src/main/cpp/unattend.c'), file('src/main/cpp/unattend.h')
+    inputs.files file('src/main/cpp/jni_disk.h'), file('src/main/cpp/wim_ntfs.h'), file('src/main/cpp/wim_ntfs.c'), file('src/main/cpp/ntfs_bridge.c'), file('src/main/cpp/ntfs_bridge.h')
+    inputs.dir rootProject.file('third_party/ntfs-3g')
     inputs.dir rootProject.file('third_party/wimlib')
     outputs.files(['arm64-v8a', 'armeabi-v7a', 'x86_64', 'x86'].collect {
         layout.buildDirectory.file("native/jniLibs/${it}/librufus_wim.so")

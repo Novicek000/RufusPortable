@@ -219,4 +219,59 @@ public class WimProxyTest {
         } finally {removeTree(extracted);assertTrue(source.delete());assertTrue(target.delete());}
     }
 
+    private byte[] applyFixture() throws IOException {
+        return bytes(InstrumentationRegistry.getInstrumentation().getContext().getAssets().open("native-apply.wim"));
+    }
+    @Test public void appliesFragmentedWimToNativeNtfsWith64BitOffsets() throws Exception {
+        Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
+        File source=File.createTempFile("apply-source-", ".bin",context.getCacheDir());
+        File target=File.createTempFile("apply-target-", ".img",context.getCacheDir());
+        byte[] wim=applyFixture();long second=0x100004000L;
+        try {
+            try(RandomAccessFile file=new RandomAccessFile(source,"rw")) {
+                file.seek(2048);file.write(wim,0,73);file.seek(second);file.write(wim,73,wim.length-73);
+            }
+            ImageFile image=ImageFile.describe(context,Uri.fromFile(source));
+            var entry=new IsoTree.Entry("sources/install.wim",false,wim.length,Arrays.asList(
+                    new IsoTree.Extent(2048,73),new IsoTree.Extent(second,wim.length-73)));
+            try(FileDisk disk=new FileDisk(target,64L<<30);ProxyImageFile proxy=new ProxyImageFile(context,image,entry)) {
+                NtfsVolume.format(disk,"WIM_APPLY",4096,2048,true);disk.highestWrite=0;
+                long[] last={0,0};int[] callbacks={0};
+                WimMetadata.apply(proxy.path(),1,disk,(done,total,files,totalFiles)->{
+                    assertTrue(done>=0 && done<=total);assertTrue(files>=0 && files<=totalFiles);
+                    callbacks[0]++;last[0]=done;last[1]=total;
+                });
+                assertNull(proxy.sourceFailure());assertTrue(callbacks[0]>1);assertEquals(last[1],last[0]);assertTrue(last[1]>0);
+                assertTrue(disk.highestWrite>0xffffffffL);
+                try(NtfsVolume volume=new NtfsVolume(disk)) {
+                    for(String path:new String[]{"rich/data.bin","rich/alias.bin"}) {
+                        byte[] data=bytes(volume.open(path));assertEquals(170003,data.length);
+                        byte[] digest=java.security.MessageDigest.getInstance("SHA-256").digest(data);
+                        StringBuilder hex=new StringBuilder();for(byte value:digest)hex.append(String.format(Locale.ROOT,"%02x",value&255));
+                        assertEquals("a9b244bdfd17275039f1e97732c7f3618c6055f15edff3eec85795e5fb31fab1",hex.toString());
+                    }
+                    assertEquals("Original żółć 日本語 😀 data.\n",new String(bytes(volume.open("żółć/日本語.txt")),java.nio.charset.StandardCharsets.UTF_8));
+                    assertEquals(0,bytes(volume.open("empty.txt")).length);
+                }
+            }
+        } finally {assertTrue(source.delete());assertTrue(target.delete());}
+    }
+    @Test public void wimApplyPreservesCancellationAndAllowsRetry() throws Exception {
+        Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
+        File source=File.createTempFile("apply-cancel-source-", ".wim",context.getCacheDir());
+        File target=File.createTempFile("apply-cancel-target-", ".img",context.getCacheDir());
+        byte[] wim=applyFixture();
+        try {
+            try(OutputStream out=new FileOutputStream(source)){out.write(wim);}
+            try(FileDisk disk=new FileDisk(target)) {
+                NtfsVolume.format(disk,"WIM_CANCEL",4096,2048,true);
+                try {WimMetadata.apply(source.getAbsolutePath(),1,disk,(a,b,c,d)->{throw new InterruptedIOException("cancel WIM apply");});
+                    fail("Cancellation ignored");}
+                catch(InterruptedIOException expected){assertEquals("cancel WIM apply",expected.getMessage());}
+                WimMetadata.apply(source.getAbsolutePath(),1,disk,(a,b,c,d)->{});
+                try(NtfsVolume volume=new NtfsVolume(disk)){assertEquals(170003,bytes(volume.open("rich/data.bin")).length);}
+            }
+        } finally {assertTrue(source.delete());assertTrue(target.delete());}
+    }
+
 }

@@ -44,7 +44,7 @@ for abi in "${@:-arm64-v8a}"; do
             "$source_dir/ntfsprogs/attrdef.c" "$source_dir/ntfsprogs/boot.c" \
             "$source_dir/ntfsprogs/sd.c" "$source_dir/ntfsprogs/utils.c" \
             "$build_dir/libntfs-3g/.libs/libntfs-3g.a" \
-            -Wl,-z,max-page-size=16384 -Wl,--no-undefined -Wl,--gc-sections -pthread \
+            -Wl,--exclude-libs,ALL -Wl,-z,max-page-size=16384 -Wl,--no-undefined -Wl,--gc-sections -pthread \
             -o "$output_dir/librufus_ntfs.so"
     )
 done

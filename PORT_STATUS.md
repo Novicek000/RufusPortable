@@ -24,7 +24,7 @@ Celem jest zgodność funkcjonalna z Rufusem z rewizji 8337c3e7e534b5d5b5045dd8e
 | Funkcja oryginału | Stan |
 | --- | --- |
 | Standardowy instalator Windows wypakowany na NTFS | Ścieżka jest podłączona w aplikacji, pliki kopiowane i weryfikowane po ponownym montowaniu; WinPE uruchomiony w QEMU, pełna instalacja do sprawdzenia |
-| Windows To Go | Do implementacji aplikowania WIM na NTFS, konfiguracji BCD oraz partycji ESP/MSR |
+| Windows To Go | Aplikowanie WIM przez callbackowy backend NTFS jest zaimplementowane i sprawdzone; konfiguracja BCD, ESP/MSR i integracja trybu pozostają do wykonania |
 | Personalizacja instalatora Windows i unattended XML | Konto, prywatność, region, BitLocker, wymagania Windows 11 i QoL podłączone do zapisu; instalacja bezobsługowa i wybór edycji podłączone; CA 2023, SkuSiPolicy i tryb S podłączone; instalacja systemu do weryfikacji |
 | FreeDOS | Podstawowy start BIOS sprawdzony w QEMU |
 | MS-DOS | Do implementacji wraz z odpowiednim źródłem plików systemowych |
@@ -160,3 +160,15 @@ Workflow windows-install-test.yml przygotowuje kompletny nośnik z oficjalnego I
 Przygotowanie sondy sprawdzono lokalnie na własnym małym WIM: aktualizacja JNI, poprawny XML, długość zastąpionego boot.wim i wrapper setup.exe. Samo przygotowanie workflow nie dowodzi udanej instalacji. Wynik uruchomienia będzie zapisany osobno. Test hosta przechowuje pojedynczy roboczy boot.wim, podczas gdy ścieżka Androida modyfikuje go bezpośrednio na NTFS przez AppFuse.
 
 Sprzątanie katalogów roboczych usuwa także zagnieżdżone zasoby EFI i czcionek. Przechodzenie drzewa nie podąża za dowiązaniami symbolicznymi. Testy obu wersji API sprawdzają usunięcie zagnieżdżonych plików i zachowanie pliku poza katalogiem wskazywanego przez dowiązanie. Łącznie 68 testów Java i lint przeszły.
+
+## Aplikowanie WIM przez backend NTFS
+
+WimMetadata.apply uruchamia oryginalny backend ntfs-3g biblioteki wimlib. Poprawka 0004 zmienia wyłącznie wybór montowania/odmontowania dla wewnętrznego celu callbackowego. Algorytmy przywracania danych i metadanych pozostają kodem wimlib. Ten backend montuje własny wolumin przez rufus_disk, bez systemowego mount, roota ani kopiowania całego WIM. JNI współdzieli adapter wywołań BlockDevice z dotychczasową biblioteką NTFS. Montowanie tworzy też pamięci podręczne NTFS używane w natywnym ntfs_mount. Biblioteki statyczne są ukryte przed eksportem symboli obu JNI.
+
+Wimlib jest budowany z obsługą NTFS dla czterech ABI. Bionic dostarcza ffs, a kompilacja uwzględnia tę deklarację w nagłówkach zgodności libntfs. Build hosta buduje i sprawdza także rdzeń NTFS. Postęp rozróżnia liczbę plików i bajty; wyjątki zapisu, synchronizacji i anulowania są przekazywane do Javy, a powtórna operacja zwalnia i odtwarza stan callbackowego celu.
+
+Test hosta aplikuje własny WIM na NTFS 128 MiB i 64 GiB, sprawdza treść Unicode, duże adresy, postęp, nieprawidłowy indeks bez zapisu, anulowanie, błędy dysku i ponowienie. Niezależne ntfsinfo i ntfscat potwierdzają tożsamość dowiązań oraz treść nazwanego strumienia. Dodatkowy test C porównuje dokładne bajty deskryptora ACL z własną próbką testową wimlib, atrybuty, trzy znaczniki czasu z dokładnością 100 ns i tag dowiązania symbolicznego.
+
+68 testów Java, lint, budowanie APK z czterema ABI i dziewięć testów Androida API 26 / x86 przeszły. Nowy test Androida aplikuje WIM z dwóch ekstentów źródła, z drugim powyżej 4 GiB, na rzadki cel 64 GiB i porównuje treść i SHA-256 odczytanych plików po ponownym zamontowaniu. Drugi sprawdza anulowanie i ponowienie. To jest silnik aplikowania obrazu; nie stanowi jeszcze uruchamialnego trybu Windows To Go w interfejsie.
+
+[CI 46072993307](https://github.com/Novicek000/RufusPortable/actions/runs/46072993307) potwierdziło wcześniejszą rewizję 5f13fee na API 26 i 35, w tym podmianę zasobów CA 2023 i kompaktowanie WIM.

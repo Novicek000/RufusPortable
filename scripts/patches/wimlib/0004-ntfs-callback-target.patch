@@ -1,0 +1,17 @@
+--- a/src/ntfs-3g_apply.c
++++ b/src/ntfs-3g_apply.c
+@@ -52,0 +53 @@
++#include "wimlib/rufus_ntfs.h"
+@@ -963,0 +965 @@
++	rufus_ntfs *callback_volume = NULL;
+@@ -973 +975,6 @@
+-	vol = ntfs_mount(ctx->common.target, 0);
++	if (strcmp(ctx->common.target, RUFUS_WIM_NTFS_TARGET) == 0) {
++		callback_volume = rufus_wim_mount_target();
++		vol = callback_volume ? rufus_ntfs_native_volume(callback_volume) : NULL;
++	} else {
++		vol = ntfs_mount(ctx->common.target, 0);
++	}
+@@ -1036 +1043 @@
+-	if (ntfs_umount(ctx->vol, FALSE) && !ret) {
++	if ((callback_volume ? rufus_ntfs_unmount(callback_volume) : ntfs_umount(ctx->vol, FALSE)) && !ret) {

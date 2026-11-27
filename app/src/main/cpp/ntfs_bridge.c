@@ -19,6 +19,7 @@
 #include "dir.h"
 #include "unistr.h"
 #include "endians.h"
+#include "cache.h"
 
 struct rufus_ntfs {
     rufus_disk *disk;
@@ -246,7 +247,13 @@ rufus_ntfs *rufus_ntfs_mount(rufus_disk *disk)
         errno = saved;
         return NULL;
     }
+    ntfs_create_lru_caches(result->volume);
     return result;
+}
+
+void *rufus_ntfs_native_volume(rufus_ntfs *volume)
+{
+    return volume?volume->volume:NULL;
 }
 
 static ntfs_inode *resolve_entry(rufus_ntfs *volume, const uint16_t *path, size_t length, mode_t create_mode)

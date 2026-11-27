@@ -8,6 +8,8 @@
 #include <wimlib.h>
 #include "wimlib/wim.h"
 #include "unattend.h"
+#include "jni_disk.h"
+#include "wim_ntfs.h"
 
 #define MAX_METADATA_FIELDS 32
 _Static_assert(sizeof(off_t)==8,"WIM JNI requires 64-bit file offsets");
@@ -265,5 +267,58 @@ JNIEXPORT void JNICALL Java_pl_rufusportable_WimMetadata_requireEditable(
             throw_error(env,"Ten boot.wim nie pozwala na bezpośrednią personalizację. Wybierz standardową instalację bez zmian WIM.");
     }
     wimlib_free(wim);
+    if(result)throw_error(env,wimlib_get_error_string(result));
+}
+
+typedef struct {
+    JNIEnv *env;
+    jobject callback;
+    jmethodID update;
+} apply_progress;
+
+static enum wimlib_progress_status apply_status(enum wimlib_progress_msg message,
+        union wimlib_progress_info *info,void *context)
+{
+    apply_progress *progress=context;
+    JNIEnv *env=progress->env;
+    if((*env)->ExceptionCheck(env))return WIMLIB_PROGRESS_STATUS_ABORT;
+    if(message==WIMLIB_PROGRESS_MSG_EXTRACT_STREAMS || message==WIMLIB_PROGRESS_MSG_EXTRACT_FILE_STRUCTURE ||
+            message==WIMLIB_PROGRESS_MSG_EXTRACT_METADATA || message==WIMLIB_PROGRESS_MSG_EXTRACT_IMAGE_BEGIN ||
+            message==WIMLIB_PROGRESS_MSG_EXTRACT_IMAGE_END) {
+        (*env)->CallVoidMethod(env,progress->callback,progress->update,(jlong)info->extract.completed_bytes,
+                (jlong)info->extract.total_bytes,(jlong)info->extract.current_file_count,(jlong)info->extract.end_file_count);
+    }
+    return (*env)->ExceptionCheck(env)?WIMLIB_PROGRESS_STATUS_ABORT:WIMLIB_PROGRESS_STATUS_CONTINUE;
+}
+
+JNIEXPORT void JNICALL Java_pl_rufusportable_WimMetadata_applyImage(
+        JNIEnv *env,jclass type,jstring filename,jint image,jobject target,jlong size,jint sector,jobject callback)
+{
+    (void)type;
+    pthread_once(&initialization,initialize_wim);
+    if(initialization_error) {throw_error(env,wimlib_get_error_string(initialization_error));return;}
+    if(!filename || image<1 || !callback) {throw_error(env,"Invalid WIM apply parameters");return;}
+    java_volume *device=connect_device(env,target,size,sector);
+    if(!device)return;
+    WIMStruct *wim=NULL;
+    const char *path=(*env)->GetStringUTFChars(env,filename,NULL);
+    int result=0,bound=0;
+    if(!path)goto apply_done;
+    result=wimlib_open_wim(path,0,&wim);
+    (*env)->ReleaseStringUTFChars(env,filename,path);
+    if(result)goto apply_done;
+    jclass callback_type=(*env)->GetObjectClass(env,callback);
+    jmethodID update=callback_type?(*env)->GetMethodID(env,callback_type,"update","(JJJJ)V"):NULL;
+    if(callback_type)(*env)->DeleteLocalRef(env,callback_type);
+    if(!update)goto apply_done;
+    apply_progress progress={env,callback,update};
+    wimlib_register_progress_function(wim,apply_status,&progress);
+    if(rufus_wim_bind_target(&device->disk)) {io_error(env);goto apply_done;}
+    bound=1;
+    result=wimlib_extract_image(wim,image,RUFUS_WIM_NTFS_TARGET,WIMLIB_EXTRACT_FLAG_NTFS);
+apply_done:
+    wimlib_free(wim);
+    if(bound)rufus_wim_bind_target(NULL);
+    release_volume(env,device);
     if(result)throw_error(env,wimlib_get_error_string(result));
 }
