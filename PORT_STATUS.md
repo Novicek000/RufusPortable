@@ -25,7 +25,7 @@ Celem jest zgodność funkcjonalna z Rufusem z rewizji 8337c3e7e534b5d5b5045dd8e
 | --- | --- |
 | Standardowy instalator Windows wypakowany na NTFS | Ścieżka jest podłączona w aplikacji, pliki kopiowane i weryfikowane po ponownym montowaniu; WinPE uruchomiony w QEMU, pełna instalacja do sprawdzenia |
 | Windows To Go | Do implementacji operacji WIM, boot configuration i partycji ESP/MSR |
-| Personalizacja instalatora Windows i unattended XML | Do implementacji |
+| Personalizacja instalatora Windows i unattended XML | Natywny generator wue.c zgodny w teście różnicowym; modyfikacja WIM na NTFS działa w Androidzie; podłączenie opcji instalatora w toku |
 | FreeDOS | Podstawowy start BIOS sprawdzony w QEMU |
 | MS-DOS | Do implementacji wraz z odpowiednim źródłem plików systemowych |
 | Syslinux 4/6, GRUB2, Grub4DOS, ReactOS | Do implementacji |
@@ -106,3 +106,13 @@ Po przyznaniu dostępu aplikacja odczytuje GET_MAX_LUN. Dla wielojednostkowych c
 `BadBlocks` zastępuje zerowanie sekwencjami z badblocks.c/rufus.h: jeden przebieg 0x55, dwa 0x55/0xaa, cztery SLC 0x00/0xff/0x55/0xaa, MLC 0x00/0xff/0x33/0xcc lub TLC 0x00/0xff/0x1c71c7/0xe38e38. Identyfikatory 64-bit w pierwszym przebiegu pozwalają wykryć aliasowanie pojemności. Tak jak źródło test używa bloków 512 KiB, pomija końcową niepełną jednostkę i kończy przy 256 uszkodzonych blokach. Bufory grupują do 64 bloków, z ograniczeniem pamięci stosownym do sterty Androida. Nieudany transfer grupy jest ponawiany osobno dla każdego bloku, błędy zapisu/odczytu/różnic są klasyfikowane i deduplikowane.
 
 Opcje pozwalają wybrać zestaw przebiegów i wykrywanie fałszywej pojemności. Wynik z błędami daje wybór ponowienia testu, kontynuacji lub przerwania. Anulowanie operacji przerywa także zadanie wykonawcze. Testy obejmują wszystkie zestawy, wzorzec TLC, fałszywą pojemność, odzyskanie po błędzie grupowego transferu, błędy trwałe, deduplikację, limit i anulowanie. Testy UI API 26/35 sprawdzają zachowanie ustawień po odtworzeniu Activity. Eksport listy bloków i diagnostyka fizycznych awarii USB pozostają do uzupełnienia.
+
+## Modyfikowanie WIM na nośniku docelowym
+
+NTFS udostępnia teraz losowy odczyt/zapis istniejącego pliku, jego rozmiar, zmianę długości i synchronizację. Testy JNI obejmują rozszerzenie, obcięcie, zerowanie rozszerzonych zakresów, błędy synchronizacji i zamknięcie wraz z woluminem. Zawartość sprawdził niezależny ntfscat. `ProxyNtfsFile` udostępnia taki plik jako zapisywalny deskryptor AppFuse. Poprawki wimlib duplikują deskryptor, weryfikują jego uprawnienia i pozwalają aktualizować WIM przez dopisanie zasobów. Dla formatów wymagających przebudowy biblioteka zwraca błąd zamiast tworzyć pełną kopię WIM poza nośnikiem.
+
+JNI dodaje wskazany plik do wybranego indeksu WIM, wypakowuje plik i weryfikuje integralność zasobów. Test hosta wykrywa uszkodzenie danych wewnątrz WIM. Cztery testy instrumentacyjne API 26 / x86 przeszły: odczyt fragmentów źródła, błąd źródła, wygenerowanie odpowiedzi instalatora i aktualizacja WIM w natywnym NTFS z odczytem po ponownym montowaniu oraz błąd synchronizacji nośnika. Nie wykonano jeszcze instalacji Windows z tą personalizacją.
+
+Generator `unattend.c` przenosi funkcję CreateUnattendXml z przypiętego wue.c. Odczyty ustawień Windows zastępują jawne parametry, a wynik powstaje w pamięci. `test-unattend-reference.sh` kompiluje niezmienioną funkcję referencyjną z kontrolowanymi wejściami systemowymi i porównuje wyniki dla 32 768 kombinacji architektury/flag. Wyniki są identyczne. Testy Java dodatkowo sprawdzają strukturę XML, konta, Unicode, regionalizację i nieprawidłowe parametry.
+
+Podmoduł `third_party/rufus` przypina pełne źródło referencyjne do 8337c3e7e534b5d5b5045dd8ecb9a7ea60e9232c. Oryginalne podpisane wrappery setup_x64.exe i setup_arm64.exe wyodrębniono z oficjalnego Rufusa v4.16 po rozpakowaniu UPX. Ich SHA-256 są identyczne z wartościami podanymi w res/setup/readme.txt źródła referencyjnego. Skrypt `extract-rufus-setup.py` umożliwia powtórzenie ekstrakcji i sprawdza te sumy. Wrappery mają zostać podłączone do personalizacji nośnika; samo dołączenie zasobów nie jest jej zakończeniem.

@@ -63,6 +63,7 @@ done
 "${NTFSCAT:-ntfscat}" "$test_dir/c.img" /sources/test.bin > "$test_dir/c.bin"
 "${NTFSCAT:-ntfscat}" "$test_dir/jni.img" /efi/boot/payload.bin > "$test_dir/jni.bin"
 "${NTFSCAT:-ntfscat}" "$test_dir/jni.img" /unfinished.bin > "$test_dir/closed.bin"
+"${NTFSCAT:-ntfscat}" "$test_dir/jni.img" /random.bin > "$test_dir/random.bin"
 python3 - "$test_dir" <<'PY'
 import pathlib, sys
 root = pathlib.Path(sys.argv[1])
@@ -70,5 +71,7 @@ assert (root / "c.bin").read_bytes() == bytes((i * 37 + 11) % 256 for i in range
 expected = bytes((i * 17 + 9) % 256 for i in range(170001))[5:169998]
 assert (root / "jni.bin").read_bytes() == expected
 assert (root / "closed.bin").read_bytes() == bytes([2, 4, 6, 8])
+random = bytes(103) + bytes(((i+3)*13+7)%256 for i in range(70001-103)) + bytes(140003-70001)
+assert (root / "random.bin").read_bytes() == random
 print("Independent NTFS readback checks passed")
 PY

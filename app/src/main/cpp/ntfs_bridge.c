@@ -330,8 +330,8 @@ static rufus_ntfs_file *open_file(rufus_ntfs *volume, const uint16_t *path, size
     if (!file)
         return NULL;
     file->owner = volume;
-    file->writable = creating;
-    file->inode = resolve_entry(volume, path, length, creating ? S_IFREG : 0);
+    file->writable = creating != 0;
+    file->inode = resolve_entry(volume, path, length, creating == 1 ? S_IFREG : 0);
     if (file->inode)
         file->attribute = ntfs_attr_open(file->inode, AT_DATA, AT_UNNAMED, 0);
     if (!file->attribute) {
@@ -354,6 +354,31 @@ rufus_ntfs_file *rufus_ntfs_create(rufus_ntfs *volume, const uint16_t *path, siz
 rufus_ntfs_file *rufus_ntfs_open(rufus_ntfs *volume, const uint16_t *path, size_t length)
 {
     return open_file(volume, path, length, 0);
+}
+
+rufus_ntfs_file *rufus_ntfs_open_update(rufus_ntfs *volume, const uint16_t *path, size_t length)
+{
+    return open_file(volume, path, length, 2);
+}
+
+int64_t rufus_ntfs_file_size(rufus_ntfs_file *file)
+{
+    if (!file) { errno = EINVAL; return -1; }
+    return file->attribute->data_size;
+}
+
+int rufus_ntfs_truncate(rufus_ntfs_file *file, int64_t length)
+{
+    if (!file || length < 0) { errno = EINVAL; return -1; }
+    if (!file->writable) { errno = EROFS; return -1; }
+    return ntfs_attr_truncate(file->attribute, length);
+}
+
+int rufus_ntfs_sync_file(rufus_ntfs_file *file)
+{
+    if (!file) { errno = EINVAL; return -1; }
+    if (ntfs_inode_sync(file->inode) != 0) return -1;
+    return file->owner->disk->sync(file->owner->disk->context);
 }
 
 int64_t rufus_ntfs_read(rufus_ntfs_file *file, int64_t offset, void *data, size_t length)

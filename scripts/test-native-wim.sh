@@ -18,6 +18,7 @@ for source_patch in "$project_dir/scripts/patches/wimlib/"*.patch; do
     fi
 done
 cp "$bridge_dir/wim_glob.h" "$source_dir/include/wimlib/rufus_glob.h"
+cp "$bridge_dir/wim_proxy.h" "$source_dir/include/wimlib/rufus_proxy.h"
 (
     cd "$build_dir"
     CC="${HOST_CC:-gcc}" CFLAGS="-O2 -fPIC -ffunction-sections -fdata-sections" \
@@ -27,7 +28,7 @@ cp "$bridge_dir/wim_glob.h" "$source_dir/include/wimlib/rufus_glob.h"
 "${HOST_CC:-gcc}" -shared -std=gnu11 -fPIC -fvisibility=hidden -ffunction-sections -fdata-sections \
     -O2 -Wall -Wextra -Werror -I "$build_dir" -I "$source_dir/include" \
     -I "$JAVA_HOME/include" -I "$JAVA_HOME/include/linux" \
-    "$bridge_dir/wim_jni.c" "$bridge_dir/wim_glob.c" "$build_dir/.libs/libwim.a" \
+    "$bridge_dir/wim_jni.c" "$bridge_dir/wim_glob.c" "$bridge_dir/unattend.c" "$build_dir/.libs/libwim.a" \
     -Wl,--gc-sections -Wl,--no-undefined -pthread -o "$test_dir/librufus_wim.so"
 "${HOST_CC:-gcc}" -std=gnu11 -Wall -Wextra -Werror -I "$bridge_dir" \
     "$bridge_dir/wim_glob.c" "$project_dir/app/src/test/native/WimGlobTest.c" \
@@ -42,7 +43,13 @@ rm -f "$fixture"
     --image-property=WINDOWS/EDITIONID=Professional --image-property=WINDOWS/VERSION/BUILD=26100
 "$build_dir/wimlib-imagex" info "$fixture" 2 --image-property=WINDOWS/ARCH=12
 "$JAVA_HOME/bin/javac" -d "$test_dir" "$project_dir/app/src/main/java/pl/rufusportable/WimMetadata.java" \
-    "$project_dir/app/src/test/native/WimMetadataTest.java"
+    "$project_dir/app/src/test/native/WimMetadataTest.java" \
+    "$project_dir/app/src/main/java/pl/rufusportable/WindowsUnattend.java" \
+    "$project_dir/app/src/test/native/WindowsUnattendTest.java"
 "$JAVA_HOME/bin/java" -Xcheck:jni -Djava.library.path="$test_dir" -cp "$test_dir" \
     pl.rufusportable.WimMetadataTest "$fixture"
 "$test_dir/wim-glob-test" "$test_dir"
+
+"$JAVA_HOME/bin/java" -Xcheck:jni -Djava.library.path="$test_dir" -cp "$test_dir" pl.rufusportable.WindowsUnattendTest
+
+bash "$project_dir/scripts/test-unattend-reference.sh"

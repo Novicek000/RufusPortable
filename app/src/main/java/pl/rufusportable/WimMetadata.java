@@ -52,5 +52,21 @@ final class WimMetadata {
         return Collections.unmodifiableList(images);
     }
 
+    static void addFile(String wimPath,int image,String source,String target) throws IOException {
+        if(image<1 || target.isEmpty() || target.startsWith("/") || target.contains("\\") ||
+                Arrays.asList(target.split("/",-1)).stream().anyMatch(p->p.isEmpty() || p.equals(".") || p.equals("..")))
+            throw new IOException("Nieprawidłowa ścieżka lub indeks obrazu WIM.");
+        update(wimPath,image,source.getBytes(StandardCharsets.UTF_8),target.getBytes(StandardCharsets.UTF_8));
+    }
+    static void extractFile(String path,int image,String target,String directory) throws IOException {
+        if(image<1 || target.indexOf(0)>=0 || directory.indexOf(0)>=0)
+            throw new IOException("Nieprawidłowe parametry wypakowania WIM.");
+        extract(path,image,target.getBytes(StandardCharsets.UTF_8),directory.getBytes(StandardCharsets.UTF_8));
+    }
+    static void verify(String path) throws IOException {verifyWim(path);}
+    private static native void verifyWim(String path) throws IOException;
+    private static native void extract(String path,int image,byte[] target,byte[] directory) throws IOException;
+    private static native void update(String path,int image,byte[] source,byte[] target) throws IOException;
+
     private static native byte[][] inspect(String path) throws IOException;
 }

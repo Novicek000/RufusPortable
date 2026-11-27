@@ -4,3 +4,6 @@
 [submodule "third_party/wimlib"]
 	path = third_party/wimlib
 	url = https://github.com/ebiggers/wimlib.git
+[submodule "third_party/rufus"]
+	path = third_party/rufus
+	url = https://github.com/pbatard/rufus.git

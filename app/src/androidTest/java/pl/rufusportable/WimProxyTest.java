@@ -73,4 +73,81 @@ public class WimProxyTest {
             assertTrue(container.delete());
         }
     }
+    private static final class FileDisk implements BlockDevice,Closeable {
+        final RandomAccessFile file;
+        boolean failSync;
+        FileDisk(File path) throws IOException {file=new RandomAccessFile(path,"rw");file.setLength(128L<<20);}
+        public long size(){return 128L<<20;}
+        public int sectorSize(){return 512;}
+        public synchronized void read(long offset,byte[] data)throws IOException{file.seek(offset);file.readFully(data);}
+        public synchronized void write(long offset,byte[] data)throws IOException{file.seek(offset);file.write(data);}
+        public void sync()throws IOException{if(failSync)throw new IOException("injected target sync failure");file.getFD().sync();}
+        public void close()throws IOException{file.close();}
+    }
+    private void updateTargetWim(boolean failSync) throws Exception {
+        Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
+        File target=File.createTempFile("wim-target-", ".img",context.getCacheDir());
+        File answer=File.createTempFile("answer-", ".xml",context.getCacheDir());
+        File extracted=new File(context.getCacheDir(),"wim-extract-"+System.nanoTime());
+        assertTrue(extracted.mkdir());
+        WindowsUnattend.Options options=new WindowsUnattend.Options();
+        options.architecture=4;options.username="żółć/Jan";
+        options.flags=WindowsUnattend.BYPASS_REQUIREMENTS|WindowsUnattend.NO_ONLINE_ACCOUNT|
+                WindowsUnattend.NO_DATA_COLLECTION|WindowsUnattend.SET_USER|WindowsUnattend.DISABLE_BITLOCKER;
+        byte[] contents=WindowsUnattend.create(options);
+        String xml=new String(contents,java.nio.charset.StandardCharsets.UTF_8);
+        assertTrue(xml.contains("processorArchitecture=\"arm64\""));
+        assertTrue(xml.contains("<Name>żółć_Jan</Name>"));
+        assertTrue(xml.contains("BypassTPMCheck"));
+        try {
+            try(FileOutputStream out=new FileOutputStream(answer)){out.write(contents);}
+            try(FileDisk disk=new FileDisk(target)) {
+                NtfsVolume.format(disk,"WIMTEST",4096,2048,true);
+                try(NtfsVolume volume=new NtfsVolume(disk)) {
+                    volume.mkdir("sources");
+                    try(OutputStream out=volume.create("sources/boot.wim")){out.write(fixture());}
+                    try(ProxyNtfsFile proxy=new ProxyNtfsFile(context,volume.openRandom("sources/boot.wim"))) {
+                        disk.failSync=failSync;
+                        try {
+                            WimMetadata.addFile(proxy.path(),2,answer.getAbsolutePath(),"Autounattend.xml");
+                            if(failSync)fail("Target sync failure was ignored");
+                            assertNull(proxy.failure());
+                        } catch(IOException error) {
+                            if(!failSync)throw error;
+                            assertNotNull(proxy.failure());
+                            assertEquals("injected target sync failure",proxy.failure().getMessage());
+                        } finally {disk.failSync=false;}
+                    }
+                }
+                if(!failSync) {
+                    try(NtfsVolume volume=new NtfsVolume(disk);
+                        ProxyNtfsFile proxy=new ProxyNtfsFile(context,volume.openRandom("sources/boot.wim"))) {
+                        assertEquals(2,WimMetadata.read(proxy.path()).size());
+                        WimMetadata.verify(proxy.path());
+                        WimMetadata.extractFile(proxy.path(),2,"Autounattend.xml",extracted.getAbsolutePath());
+                        File result=new File(extracted,"Autounattend.xml");
+                        byte[] actual=new byte[contents.length];
+                        try(DataInputStream input=new DataInputStream(new FileInputStream(result))) {
+                            input.readFully(actual);assertEquals(-1,input.read());
+                        }
+                        assertArrayEquals(contents,actual);assertTrue(result.delete());
+                        try {
+                            WimMetadata.extractFile(proxy.path(),1,"Autounattend.xml",extracted.getAbsolutePath());
+                            fail("Unselected WIM image was modified");
+                        } catch(IOException expected) {}
+                    }
+                }
+            }
+        } finally {
+            for(File child:Objects.requireNonNull(extracted.listFiles()))assertTrue(child.delete());
+            assertTrue(extracted.delete());assertTrue(answer.delete());assertTrue(target.delete());
+        }
+    }
+    @Test public void updatesWimDirectlyOnNativeNtfsAndExtractsAfterRemount() throws Exception {
+        updateTargetWim(false);
+    }
+    @Test public void wimUpdatePropagatesTargetSyncFailure() throws Exception {
+        updateTargetWim(true);
+    }
+
 }

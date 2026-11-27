@@ -1,0 +1,21 @@
+--- a/src/write.c
++++ b/src/write.c
+@@ -35,0 +36,3 @@
++#ifdef __ANDROID__
++#include "wimlib/rufus_proxy.h"
++#endif
+@@ -2214,0 +2218,5 @@
++#ifdef __ANDROID__
++    int proxy_fd = android_proxy_fd(path);
++    int raw_fd = proxy_fd >= 0 ? android_proxy_duplicate(proxy_fd, 1) :
++            topen(path, open_flags | O_BINARY, 0644);
++#else
+@@ -2215,0 +2224 @@
++#endif
+@@ -3365,0 +3375,6 @@
++#ifdef __ANDROID__
++    /* A virtual descriptor has no writable parent directory. Never stage or
++     * rebuild a full WIM elsewhere when its representation requires rebuild. */
++    if (android_proxy_fd(wim->filename) >= 0)
++        return WIMLIB_ERR_UNSUPPORTED;
++#endif

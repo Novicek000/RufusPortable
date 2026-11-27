@@ -17,6 +17,7 @@ for source_patch in "$project_dir/scripts/patches/wimlib/"*.patch; do
     fi
 done
 cp "$bridge_dir/wim_glob.h" "$source_dir/include/wimlib/rufus_glob.h"
+cp "$bridge_dir/wim_proxy.h" "$source_dir/include/wimlib/rufus_proxy.h"
 for abi in "${@:-arm64-v8a}"; do
     case "$abi" in
         arm64-v8a) target=aarch64-linux-android; compiler=aarch64-linux-android26-clang ;;
@@ -40,7 +41,7 @@ for abi in "${@:-arm64-v8a}"; do
         "$toolchain/$compiler" -shared -std=gnu11 -fPIC -fvisibility=hidden \
             -ffunction-sections -fdata-sections -O2 -Wall -Wextra -Werror \
             -I "$build_dir" -I "$source_dir/include" \
-            "$bridge_dir/wim_jni.c" "$bridge_dir/wim_glob.c" ".libs/libwim.a" \
+            "$bridge_dir/wim_jni.c" "$bridge_dir/wim_glob.c" "$bridge_dir/unattend.c" ".libs/libwim.a" \
             -Wl,-z,max-page-size=16384 -Wl,--gc-sections -Wl,--no-undefined -pthread \
             -o "$output_dir/librufus_wim.so"
     )

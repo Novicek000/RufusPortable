@@ -230,6 +230,49 @@ JNIEXPORT jlong JNICALL Java_pl_rufusportable_NtfsVolume_openRead(
     return (jlong)(intptr_t)file;
 }
 
+JNIEXPORT jlong JNICALL Java_pl_rufusportable_NtfsVolume_openUpdate(
+        JNIEnv *env, jclass type, jlong handle, jstring path)
+{
+    (void)type;
+    java_volume *volume = (java_volume *)(intptr_t)handle;
+    if (!volume || !path) {
+        errno = EINVAL;
+        io_error(env);
+        return 0;
+    }
+    const jchar *name = (*env)->GetStringChars(env, path, NULL);
+    if (!name)
+        return 0;
+    rufus_ntfs_file *file = rufus_ntfs_open_update(volume->volume, name, (*env)->GetStringLength(env, path));
+    (*env)->ReleaseStringChars(env, path, name);
+    if (!file)
+        io_error(env);
+    return (jlong)(intptr_t)file;
+}
+
+JNIEXPORT jlong JNICALL Java_pl_rufusportable_NtfsVolume_fileSize(
+        JNIEnv *env, jclass type, jlong handle)
+{
+    (void)type;
+    int64_t length = rufus_ntfs_file_size((rufus_ntfs_file *)(intptr_t)handle);
+    if (length < 0) io_error(env);
+    return length;
+}
+
+JNIEXPORT void JNICALL Java_pl_rufusportable_NtfsVolume_truncate(
+        JNIEnv *env, jclass type, jlong handle, jlong length)
+{
+    (void)type;
+    if (rufus_ntfs_truncate((rufus_ntfs_file *)(intptr_t)handle, length) != 0) io_error(env);
+}
+
+JNIEXPORT void JNICALL Java_pl_rufusportable_NtfsVolume_syncFile(
+        JNIEnv *env, jclass type, jlong handle)
+{
+    (void)type;
+    if (rufus_ntfs_sync_file((rufus_ntfs_file *)(intptr_t)handle) != 0) io_error(env);
+}
+
 JNIEXPORT jint JNICALL Java_pl_rufusportable_NtfsVolume_read(
         JNIEnv *env, jclass type, jlong handle, jlong offset, jbyteArray data, jint start, jint length)
 {

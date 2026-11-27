@@ -48,6 +48,63 @@ final class NtfsVolume implements Closeable {
         return file;
     }
 
+    synchronized RandomFile openRandom(String path) throws IOException {
+        requireOpen();
+        RandomFile file=new RandomFile(openUpdate(handle,path));
+        files.add(file);
+        return file;
+    }
+
+    final class RandomFile implements Closeable {
+        private long fileHandle;
+        RandomFile(long handle) {fileHandle=handle;}
+        private void check() throws IOException {
+            requireOpen();
+            if(fileHandle==0) throw new IOException("Plik NTFS jest zamknięty.");
+            if(Thread.currentThread().isInterrupted()) throw new InterruptedIOException();
+        }
+        long size() throws IOException {
+            synchronized(NtfsVolume.this) {check();return fileSize(fileHandle);}
+        }
+        int read(long offset,byte[] data,int start,int count) throws IOException {
+            if(start<0 || count<0 || start>data.length-count || offset<0 || count>Long.MAX_VALUE-offset)
+                throw new IOException("Nieprawidłowy zakres pliku NTFS.");
+            synchronized(NtfsVolume.this) {
+                check();int done=0;
+                while(done<count) {
+                    check();
+                    int bytes=NtfsVolume.read(fileHandle,offset+done,data,start+done,Math.min(131072,count-done));
+                    if(bytes==0) break;
+                    done+=bytes;
+                }
+                return done;
+            }
+        }
+        void write(long offset,byte[] data,int start,int count) throws IOException {
+            if(start<0 || count<0 || start>data.length-count || offset<0 || count>Long.MAX_VALUE-offset)
+                throw new IOException("Nieprawidłowy zakres pliku NTFS.");
+            synchronized(NtfsVolume.this) {
+                check();int done=0;
+                while(done<count) {
+                    check();int bytes=Math.min(131072,count-done);
+                    NtfsVolume.write(fileHandle,offset+done,data,start+done,bytes);done+=bytes;
+                }
+            }
+        }
+        void truncate(long length) throws IOException {
+            synchronized(NtfsVolume.this) {check();NtfsVolume.truncate(fileHandle,length);}
+        }
+        void sync() throws IOException {
+            synchronized(NtfsVolume.this) {check();syncFile(fileHandle);}
+        }
+        @Override public void close() throws IOException {
+            synchronized(NtfsVolume.this) {
+                if(fileHandle==0) return;
+                long closing=fileHandle;fileHandle=0;files.remove(this);closeFile(closing);
+            }
+        }
+    }
+
     @Override
     public synchronized void close() throws IOException {
         if (handle == 0) {
@@ -187,6 +244,10 @@ final class NtfsVolume implements Closeable {
         }
     }
 
+    private static native long openUpdate(long volume,String path) throws IOException;
+    private static native long fileSize(long file) throws IOException;
+    private static native void truncate(long file,long length) throws IOException;
+    private static native void syncFile(long file) throws IOException;
     private static native long openRead(long volume, String path) throws IOException;
     private static native int read(long file, long offset, byte[] data, int start, int length) throws IOException;
     private static native void format(BlockDevice device, long size, int sectorSize,

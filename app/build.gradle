@@ -48,7 +48,7 @@ def nativeWim = tasks.register('buildNativeWim', Exec) {
             new File(System.getenv('ANDROID_HOME') ?: '', 'ndk/27.2.12479018').absolutePath
     inputs.file rootProject.file('scripts/build-wim.sh')
     inputs.dir rootProject.file('scripts/patches/wimlib')
-    inputs.files file('src/main/cpp/wim_jni.c'), file('src/main/cpp/wim_glob.c'), file('src/main/cpp/wim_glob.h')
+    inputs.files file('src/main/cpp/wim_jni.c'), file('src/main/cpp/wim_glob.c'), file('src/main/cpp/wim_glob.h'), file('src/main/cpp/wim_proxy.h'), file('src/main/cpp/unattend.c'), file('src/main/cpp/unattend.h')
     inputs.dir rootProject.file('third_party/wimlib')
     outputs.files(['arm64-v8a', 'armeabi-v7a', 'x86_64', 'x86'].collect {
         layout.buildDirectory.file("native/jniLibs/${it}/librufus_wim.so")
