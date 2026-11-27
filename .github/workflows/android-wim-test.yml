@@ -43,6 +43,8 @@ jobs:
           export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018"
           ./gradlew assembleDebug assembleDebugAndroidTest testDebugUnitTest lintRelease --max-workers=2
           bash scripts/test-native-wim.sh
+          bash scripts/test-native-hive.sh
+          bash scripts/test-hive-reference.sh
       - name: Independently verify FAT16 and FAT32 trees
         run: |
           python3 -m venv "$RUNNER_TEMP/fat-test-venv"

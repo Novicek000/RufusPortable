@@ -59,3 +59,18 @@ def nativeWim = tasks.register('buildNativeWim', Exec) {
     })
 }
 tasks.named('preBuild').configure { dependsOn nativeWim }
+
+def nativeHive = tasks.register('buildNativeHive', Exec) {
+    workingDir rootProject.projectDir
+    commandLine 'bash', 'scripts/build-hive.sh', 'arm64-v8a', 'armeabi-v7a', 'x86_64', 'x86'
+    environment 'ANDROID_NDK_HOME', System.getenv('ANDROID_NDK_HOME') ?:
+            new File(System.getenv('ANDROID_HOME') ?: '', 'ndk/27.2.12479018').absolutePath
+    inputs.file rootProject.file('scripts/build-hive.sh')
+    inputs.dir rootProject.file('third_party/hivex')
+    inputs.dir file('src/main/cpp/hive_compat')
+    inputs.files file('src/main/cpp/hive_jni.c'), file('src/main/cpp/hive_iconv.c')
+    outputs.files(['arm64-v8a', 'armeabi-v7a', 'x86_64', 'x86'].collect {
+        layout.buildDirectory.file("native/jniLibs/${it}/librufus_hive.so")
+    })
+}
+tasks.named('preBuild').configure { dependsOn nativeHive }

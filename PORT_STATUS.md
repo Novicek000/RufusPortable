@@ -182,3 +182,13 @@ Test hosta utworzył siedem wariantów, w tym FAT16/FAT32 dla sektorów 512 B i 
 68 testów Java, lint, budowanie APK i dziesięć testów Androida API 26 / x86 przeszły. Nowy test kopiuje dane z natywnego NTFS po aplikowaniu WIM do FAT32 z sektorami 4 KiB i pustą etykietą. Wyeksportowany rzadki obraz 512 MiB z emulatora przeszedł ponownie fsck.fat oraz niezależne porównanie nazw Unicode i SHA-256 obu plików. Są to własne niebootowalne dane testowe. Integracja tego silnika z wyborem systemu plików i pełny rozruch Windows To Go nadal pozostają do wykonania.
 
 [CI 46075286618](https://github.com/Novicek000/RufusPortable/actions/runs/46075286618) potwierdziło wcześniejszą rewizję 97f34fc na Androidzie API 26 i 35, w tym aplikowanie WIM przez NTFS i anulowanie.
+
+## Rejestr offline dla konfiguracji rozruchu
+
+Podmoduł hivex jest przypięty do v1.3.24 / 7996d79cf910758fcb29554e83f44c94560f170d. RegistryHive udostępnia odczyt i zmianę wartości, listę podkluczy, usuwanie, jawny zapis i zamknięcie. Źródło pozostaje niezmienione przy zapisie do innego pliku. Hivex parsuje i zapisuje komórki, a port zawiera małe adaptery odczytu/zapisu i konwersji UTF-8 / UTF-16LE / Latin-1 dla API 26–27. Nie włącza heurystyk zapisu uszkodzonych rejestrów. Biblioteka dla czterech ABI jest dołączona do APK.
+
+Adapter kodowania porównano z libc iconv dla każdego skalaru Unicode, Latin-1 oraz błędnych i niepełnych sekwencji. Testy JNI sprawdzają DWORD, Unicode w nazwach wartości i danych, dane binarne z zerami, zastępowanie bez kasowania innych wartości, rozrost o 1000 kluczy, usuwanie, tryb tylko do odczytu, nieudany commit i zamknięcie. Niezależny parser rejestru z wimlib odczytał i potwierdził zapisany wynik. Ze względu na algorytm haszowania nowych nazw lh w hivex 1.3.24 wrapper tworzy tylko klucze ASCII używane przez konfigurację Rufusa; istniejące klucze Unicode i wartości Unicode są zachowane.
+
+68 testów Java, lint, budowanie APK i dwanaście testów Androida API 26 / x86 przeszły. Dwa nowe testy obejmują zapis do ścieżki Unicode, ponowne otwarcie, wartości 64-bitowe, tryb tylko do odczytu i zamknięcie. Jest to warstwa edycji rejestru; konfiguracja BCD i pełna integracja Windows To Go nadal są w toku.
+
+Próba pełnej instalacji Windows [CI 46073326965](https://github.com/Novicek000/RufusPortable/actions/runs/46073326965) utworzyła i zweryfikowała cały spersonalizowany nośnik, uruchomiła WinPE i przeszła bez pytań do ekranu instalowania. Zrzuty pokazują postęp od 11% po dwóch minutach do 51% po 44 minutach. Limit 45 minut zakończył VM przed ukończeniem. Nie jest to potwierdzenie udanej instalacji; kolejna próba ma dłuższy czas i pomiary aktywności dysków.

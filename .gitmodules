@@ -7,3 +7,6 @@
 [submodule "third_party/rufus"]
 	path = third_party/rufus
 	url = https://github.com/pbatard/rufus.git
+[submodule "third_party/hivex"]
+	path = third_party/hivex
+	url = https://github.com/libguestfs/hivex.git

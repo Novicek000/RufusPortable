@@ -1,4 +1,4 @@
-These small fixtures contain only self-generated dummy data, with no Windows binaries.
+metadata.wim and windows-test.iso contain self-generated dummy data, with no Windows binaries.
 The ISO is NOT bootable and cannot install an operating system.
 Generate them with scripts/generate-android-fixtures.sh after building the host WIM tool.
 Copy metadata.wim and windows-test.iso from app/build/native/android-fixtures here to refresh them.
@@ -9,3 +9,8 @@ app/build/native/host-wim/tests/apply.wim to refresh it. It contains original pa
 a relative symbolic link, a hard link, an alternate data stream and wimlib's own
 security_descriptor_1.bin test descriptor (third_party/wimlib/tests, LGPL).
 It contains no Windows system files and is not an installable Windows image.
+
+registry-minimal.hive is hivex's handcrafted minimal registry test fixture from
+third_party/hivex/images/minimal. Its origin (a heavily trimmed and hand-edited
+Windows 2003 registry root/security record) is documented in hivex/images/README.
+It contains no Windows program code. Hivex is LGPL-2.1.
