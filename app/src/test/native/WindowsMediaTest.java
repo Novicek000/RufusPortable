@@ -97,7 +97,8 @@ public final class WindowsMediaTest {
         WindowsLayout layout = WindowsLayout.create(capacity, 512, true, 4096,
                 Files.readAllBytes(assets.resolve("uefi-ntfs.img")),
                 Files.readAllBytes(assets.resolve("mbr_win7.bin")));
-        WindowsInstaller plan = new WindowsInstaller(entries, layout.mainLength, 4096);
+        try(WindowsInstallProbe probe=args.length>3 && args[3].equals("install")?WindowsInstallProbe.prepare(entries,image,assets):null) {
+        WindowsInstaller plan = new WindowsInstaller(probe==null?entries:probe.customization.entries, layout.mainLength, 4096);
         System.out.println("ISO bytes=" + image.length + " entries=" + entries.size());
         System.out.println("install.wim bytes=" + wim.length + " extents=" + wim.extents.size());
         System.out.println("Total extracted file bytes=" + plan.bytes);
@@ -128,7 +129,7 @@ public final class WindowsMediaTest {
                 public void sync() throws IOException { disk.getFD().sync(); }
             };
             int[] last = {-1};
-            plan.install(partition, e -> new ExtentInputStream(image, e), "WINDOWS_TEST", 4096, true,
+            plan.install(partition, e -> probe==null?new ExtentInputStream(image, e):probe.open(image,e), "WINDOWS_TEST", 4096, true,
                     Files.readAllBytes(assets.resolve("br_ntfs_0x0.bin")),
                     Files.readAllBytes(assets.resolve("br_ntfs_0x54.bin")), true,
                     (verifying, path, done, total) -> {
@@ -151,5 +152,6 @@ public final class WindowsMediaTest {
             }
         }
         System.out.println("Full Windows ISO extraction and all file SHA-256 checks passed");
+        }
     }
 }

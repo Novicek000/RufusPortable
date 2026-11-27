@@ -152,3 +152,9 @@ Przed formatowaniem opcja CA 2023 wypakowuje wyłącznie katalogi Windows/Boot/E
 66 testów Java, lint, budowanie czterech ABI, natywne testy WIM i porównanie generatora przeszły. Siedem testów na API 26 / x86 przeszło. Nowy test przechodzi od własnego ISO przez AppFuse, wypakowanie zasobów EFI, plan podmiany, instalację NTFS i kompaktowanie docelowego WIM do weryfikacji po ponownym montowaniu. Używa własnych danych testowych; nie dowodzi rozruchu Microsoft Secure Boot CA 2023 na fizycznym komputerze.
 
 [CI 46045827499](https://github.com/Novicek000/RufusPortable/actions/runs/46045827499) potwierdziło wcześniejszą rewizję a21f401 na API 26 i 35, w tym wybór edycji i potwierdzenia instalacji bezobsługowej.
+
+## Próba pełnej instalacji w CI — przygotowanie
+
+Workflow windows-install-test.yml przygotowuje kompletny nośnik z oficjalnego ISO i uruchamia odizolowaną maszynę QEMU/KVM z nowym plikiem dysku docelowego. Hostowy test używa tego samego generatora XML, wrapperów, planu plików i NTFS. Wyłącznie test dodaje do FirstLogonCommands polecenie zapisania informacji o zainstalowanym systemie i wyłączenia VM. Po zatrzymaniu VM test ma odczytać wynik z NTFS i sprawdzić konto, wersję, region, strefę oraz IMAGE_STATE_COMPLETE.
+
+Przygotowanie sondy sprawdzono lokalnie na własnym małym WIM: aktualizacja JNI, poprawny XML, długość zastąpionego boot.wim i wrapper setup.exe. Samo przygotowanie workflow nie dowodzi udanej instalacji. Wynik uruchomienia będzie zapisany osobno. Test hosta przechowuje pojedynczy roboczy boot.wim, podczas gdy ścieżka Androida modyfikuje go bezpośrednio na NTFS przez AppFuse.

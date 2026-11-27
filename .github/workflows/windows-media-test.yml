@@ -25,6 +25,6 @@ jobs:
       - name: Extract and verify the full official Windows ISO
         run: |
           test_dir="$PWD/app/build/native/host/tests"
-          "$JAVA_HOME/bin/javac" -cp "$test_dir" -d "$test_dir"             app/src/main/java/pl/rufusportable/UdfTree.java             app/src/main/java/pl/rufusportable/ExtentInputStream.java             app/src/test/native/WindowsMediaTest.java
+          "$JAVA_HOME/bin/javac" -cp "$test_dir" -d "$test_dir"             app/src/main/java/pl/rufusportable/UdfTree.java             app/src/main/java/pl/rufusportable/ExtentInputStream.java             app/src/main/java/pl/rufusportable/WindowsUnattend.java app/src/main/java/pl/rufusportable/WimMetadata.java app/src/main/java/pl/rufusportable/WindowsCustomization.java app/src/test/native/WindowsInstallProbe.java app/src/test/native/WindowsMediaTest.java
           "$JAVA_HOME/bin/java" -Xcheck:jni -Xmx512m -Djava.library.path="$test_dir"             -cp "$test_dir" pl.rufusportable.WindowsMediaTest "$WINDOWS_ISO_URL"             "$RUNNER_TEMP/windows-native.img" "$PWD/app/src/main/assets/rufus"
           df -h .
