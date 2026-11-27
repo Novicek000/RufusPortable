@@ -9,22 +9,26 @@ final class WimMetadata {
         System.loadLibrary("rufus_wim");
     }
 
+    private static final String[] PROPERTIES={"NAME","DESCRIPTION","WINDOWS/ARCH","WINDOWS/EDITIONID",
+            "WINDOWS/VERSION/BUILD","WINDOWS/LANGUAGES/LANGUAGE","DISPLAYNAME",
+            "WINDOWS/VERSION/MAJOR","WINDOWS/VERSION/MINOR","WINDOWS/PRODUCTTYPE"};
+
     static final class Image {
         final int index;
         final String name, description, architecture, edition, build, language;
 
-        Image(int index, byte[][] fields, int start) {
-            this.index = index;
-            name = text(fields[start]);
-            description = text(fields[start + 1]);
-            architecture = text(fields[start + 2]);
-            edition = text(fields[start + 3]);
-            build = text(fields[start + 4]);
-            language = text(fields[start + 5]);
+        private final Map<String,String> properties;
+        Image(int index, Map<String,String> properties) {
+            this.index=index;
+            this.properties=Collections.unmodifiableMap(new HashMap<>(properties));
+            name=property("NAME");description=property("DESCRIPTION");architecture=property("WINDOWS/ARCH");
+            edition=property("WINDOWS/EDITIONID");build=property("WINDOWS/VERSION/BUILD");
+            language=property("WINDOWS/LANGUAGES/LANGUAGE");
         }
-
-        private static String text(byte[] bytes) {
-            return new String(bytes, StandardCharsets.UTF_8);
+        String property(String key) {return properties.getOrDefault(key,"");}
+        String editionName() {
+            String display=property("DISPLAYNAME");
+            return !display.isEmpty()?display:!description.isEmpty()?description:"Nieznana wersja Windows";
         }
 
         String displayName() {
@@ -43,13 +47,16 @@ final class WimMetadata {
     }
 
     static List<Image> read(String path) throws IOException {
-        byte[][] fields = inspect(path);
-        if (fields.length % 6 != 0) {
+        byte[][] fields = inspect(path,PROPERTIES);
+        if (fields.length % PROPERTIES.length != 0) {
             throw new IOException("Niepełne informacje WIM.");
         }
         List<Image> images = new ArrayList<>();
-        for (int i = 0; i < fields.length; i += 6) {
-            images.add(new Image(i / 6 + 1, fields, i));
+        for (int i = 0; i < fields.length; i += PROPERTIES.length) {
+            Map<String,String> properties=new HashMap<>();
+            for(int j=0;j<PROPERTIES.length;j++)
+                properties.put(PROPERTIES[j],new String(fields[i+j],StandardCharsets.UTF_8));
+            images.add(new Image(i / PROPERTIES.length + 1,properties));
         }
         return Collections.unmodifiableList(images);
     }
@@ -71,5 +78,5 @@ final class WimMetadata {
     private static native void extract(String path,int image,byte[] target,byte[] directory) throws IOException;
     private static native long update(String path,int image,byte[] source,byte[] target) throws IOException;
 
-    private static native byte[][] inspect(String path) throws IOException;
+    private static native byte[][] inspect(String path,String[] properties) throws IOException;
 }

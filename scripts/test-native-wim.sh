@@ -41,7 +41,8 @@ rm -f "$fixture"
 "$build_dir/wimlib-imagex" append "$test_dir/fixture" "$fixture" 'Windows Test 😀' 'Second test image'
 "$build_dir/wimlib-imagex" info "$fixture" 1 --image-property=WINDOWS/ARCH=9 \
     --image-property=WINDOWS/EDITIONID=Professional --image-property=WINDOWS/VERSION/BUILD=26100 \
-    --image-property=WINDOWS/LANGUAGES/LANGUAGE=en-US
+    --image-property=WINDOWS/LANGUAGES/LANGUAGE=en-US \
+    --image-property=DISPLAYNAME='Windows Test Pro' --image-property=WINDOWS/VERSION/MAJOR=10
 "$build_dir/wimlib-imagex" info "$fixture" 2 --image-property=WINDOWS/ARCH=12
 "$JAVA_HOME/bin/javac" -d "$test_dir" "$project_dir/app/src/main/java/pl/rufusportable/WimMetadata.java" \
     "$project_dir/app/src/test/native/WimMetadataTest.java" \

@@ -25,7 +25,7 @@ Celem jest zgodność funkcjonalna z Rufusem z rewizji 8337c3e7e534b5d5b5045dd8e
 | --- | --- |
 | Standardowy instalator Windows wypakowany na NTFS | Ścieżka jest podłączona w aplikacji, pliki kopiowane i weryfikowane po ponownym montowaniu; WinPE uruchomiony w QEMU, pełna instalacja do sprawdzenia |
 | Windows To Go | Do implementacji aplikowania WIM na NTFS, konfiguracji BCD oraz partycji ESP/MSR |
-| Personalizacja instalatora Windows i unattended XML | Konto, prywatność, region, BitLocker, wymagania Windows 11 i QoL podłączone do zapisu; silent install, CA 2023 i SkuSiPolicy oraz instalacja systemu do uzupełnienia |
+| Personalizacja instalatora Windows i unattended XML | Konto, prywatność, region, BitLocker, wymagania Windows 11 i QoL podłączone do zapisu; instalacja bezobsługowa i wybór edycji podłączone; CA 2023, SkuSiPolicy i instalacja systemu do uzupełnienia |
 | FreeDOS | Podstawowy start BIOS sprawdzony w QEMU |
 | MS-DOS | Do implementacji wraz z odpowiednim źródłem plików systemowych |
 | Syslinux 4/6, GRUB2, Grub4DOS, ReactOS | Do implementacji |
@@ -134,3 +134,11 @@ Aktualizacja WIM korzysta z WIMLIB_WRITE_FLAG_UNSAFE_COMPACT jak ApplyWindowsCus
 Obsługa USB wykonuje reset klasy Bulk-Only i czyści halt obu endpointów po błędzie transportu. Ponawia komendę najwyżej raz. REQUEST SENSE rozróżnia ochronę zapisu, brak nośnika, błędy sprzętu oraz przejściowe Unit Attention i Aborted Command. Krótkie odpowiedzi sense i READ CAPACITY(16) są akceptowane tylko z poprawnym residue i wymaganymi polami. Alternatywny interfejs Bulk-Only jest aktywowany przed komendami; nie stanowi to implementacji UAS. 58 testów Java i lint przeszły, w tym przerwany zapis, błędna faza, nieudany reset i ograniczenie ponowień. Testy transportu używają emulowanego urządzenia, próby fizycznych awarii pozostają do wykonania.
 
 [CI 46043061271](https://github.com/Novicek000/RufusPortable/actions/runs/46043061271) potwierdziło personalizację z rewizji 902e5f5: po sześć testów instrumentacyjnych na API 26 i 35, budowanie czterech ABI, 51 testów Java, lint i testy natywne, w tym 32 768 porównań generatora z oryginałem.
+
+## Instalacja bezobsługowa i edycje Windows
+
+Profil instalatora odczytuje metadane install.wim lub install.esd przez bezpośredni AppFuse. Wybór zachowuje indeks WIM; nazwa edycji stosuje DISPLAYNAME, następnie DESCRIPTION i nazwę zastępczą, tak jak GetEditions. JNI przyjmuje listę właściwości zamiast sztywnego rekordu. UTF-8 pozostaje zachowane.
+
+Dla Windows 11 opcja bezobsługowa pojawia się dopiero po włączeniu konta lokalnego, regionalizacji i pomijania pytań o zbieranie danych. Wyłączenie któregoś warunku odznacza ją. Przed zastosowaniem trzy oświadczenia wymagają osobnego zaznaczenia, zgodnie z SelectionDialog oryginału. Końcowe potwierdzenie USB przypomina o automatycznym wymazaniu dysku 0 komputera. Wybór edycji i ustawienia przetrwają odtworzenie Activity. XML nadal pochodzi z porównanego generatora Rufusa; test sprawdza indeks edycji i cel disk 0 / partition 3.
+
+60 testów Java, lint, kompilacja czterech ABI, testy hostowe WIM oraz 32 768 porównań XML przeszły. Sześć testów na API 26 / x86 przeszło, w tym obsługa syntetycznego ISO, rzeczywisty natywny odczyt WIM i wybór edycji ARM64 przez dostępność Androida wraz z trzema potwierdzeniami. Nie jest to jeszcze test automatycznej instalacji Windows.

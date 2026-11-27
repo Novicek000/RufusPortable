@@ -10,12 +10,15 @@ public final class WimMetadataTest {
         var first=images.get(0);
         if(first.index!=1 || !first.name.equals("Windows Test żółć") ||
                 !first.architecture.equals("9") || !first.edition.equals("Professional") ||
+                !first.editionName().equals("Windows Test Pro") || !first.property("WINDOWS/VERSION/MAJOR").equals("10") ||
                 !first.build.equals("26100") || !first.platform().equals("x64") || !first.language.equals("en-US"))
             throw new AssertionError("first image metadata");
         var second=images.get(1);
         if(second.index!=2 || !second.name.equals("Windows Test 😀") ||
-                !second.platform().equals("ARM64") || !second.description.equals("Second test image"))
+                !second.editionName().equals("Second test image") || !second.platform().equals("ARM64") || !second.description.equals("Second test image"))
             throw new AssertionError("UTF-8 metadata");
+        if(!new WimMetadata.Image(3,java.util.Collections.emptyMap()).editionName().equals("Nieznana wersja Windows"))
+            throw new AssertionError("missing edition fallback");
         Path invalid=Files.createTempFile(Path.of(args[0]).getParent(),"invalid-wim",".bin");
         try {
             Files.writeString(invalid,"invalid WIM header");

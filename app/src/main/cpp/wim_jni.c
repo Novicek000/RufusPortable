@@ -9,7 +9,7 @@
 #include "wimlib/wim.h"
 #include "unattend.h"
 
-#define METADATA_FIELDS 6
+#define MAX_METADATA_FIELDS 32
 _Static_assert(sizeof(off_t)==8,"WIM JNI requires 64-bit file offsets");
 
 static pthread_once_t initialization = PTHREAD_ONCE_INIT;
@@ -32,7 +32,7 @@ static void throw_error(JNIEnv *env, const char *message)
 }
 
 JNIEXPORT jobjectArray JNICALL Java_pl_rufusportable_WimMetadata_inspect(
-        JNIEnv *env, jclass type, jstring filename)
+        JNIEnv *env, jclass type, jstring filename, jobjectArray keys)
 {
     (void)type;
     pthread_once(&initialization, initialize_wim);
@@ -54,48 +54,51 @@ JNIEXPORT jobjectArray JNICALL Java_pl_rufusportable_WimMetadata_inspect(
         throw_error(env, wimlib_get_error_string(result));
         return NULL;
     }
+    jobjectArray values=NULL;
+    jsize fields=keys?(*env)->GetArrayLength(env,keys):0;
+    jstring key_objects[MAX_METADATA_FIELDS]={0};
+    const char *properties[MAX_METADATA_FIELDS]={0};
+    if(fields<1 || fields>MAX_METADATA_FIELDS) {
+        throw_error(env,"Invalid WIM metadata properties");
+        goto metadata_done;
+    }
+    for(jsize field=0;field<fields;field++) {
+        key_objects[field]=(*env)->GetObjectArrayElement(env,keys,field);
+        if(!key_objects[field]) {throw_error(env,"Missing WIM property key");goto metadata_done;}
+        properties[field]=(*env)->GetStringUTFChars(env,key_objects[field],NULL);
+        if(!properties[field])goto metadata_done;
+    }
     struct wimlib_wim_info info;
     result = wimlib_get_wim_info(wim, &info);
-    if (result || info.image_count > INT_MAX / METADATA_FIELDS) {
+    if (result || info.image_count > (uint32_t)(INT_MAX / fields)) {
         throw_error(env, result ? wimlib_get_error_string(result) : "Too many WIM images");
-        wimlib_free(wim);
-        return NULL;
+        goto metadata_done;
     }
     jclass byte_array = (*env)->FindClass(env, "[B");
-    jobjectArray values = byte_array ?
-            (*env)->NewObjectArray(env, info.image_count * METADATA_FIELDS, byte_array, NULL) : NULL;
-    if (byte_array)
-        (*env)->DeleteLocalRef(env, byte_array);
+    values = byte_array ? (*env)->NewObjectArray(env, info.image_count * fields, byte_array, NULL) : NULL;
+    if (byte_array) (*env)->DeleteLocalRef(env, byte_array);
     if (values) {
         for (uint32_t index = 1; index <= info.image_count; index++) {
-            const char *properties[] = {
-                wimlib_get_image_name(wim, index),
-                wimlib_get_image_description(wim, index),
-                wimlib_get_image_property(wim, index, "WINDOWS/ARCH"),
-                wimlib_get_image_property(wim, index, "WINDOWS/EDITIONID"),
-                wimlib_get_image_property(wim, index, "WINDOWS/VERSION/BUILD"),
-                wimlib_get_image_property(wim, index, "WINDOWS/LANGUAGES/LANGUAGE")
-            };
-            for (int field = 0; field < METADATA_FIELDS; field++) {
-                const char *text = properties[field] ? properties[field] : "";
+            for (jsize field = 0; field < fields; field++) {
+                const char *text=wimlib_get_image_property(wim,index,properties[field]);
+                if(!text)text="";
                 size_t length = strlen(text);
-                if (length > INT_MAX) {
-                    throw_error(env, "WIM property is too large");
-                    break;
-                }
+                if (length > INT_MAX) {throw_error(env, "WIM property is too large");break;}
                 jbyteArray bytes = (*env)->NewByteArray(env, length);
-                if (!bytes)
-                    break;
+                if (!bytes) break;
                 (*env)->SetByteArrayRegion(env, bytes, 0, length, (const jbyte *)text);
                 if (!(*env)->ExceptionCheck(env))
-                    (*env)->SetObjectArrayElement(env, values, (index - 1) * METADATA_FIELDS + field, bytes);
+                    (*env)->SetObjectArrayElement(env, values, (index - 1) * fields + field, bytes);
                 (*env)->DeleteLocalRef(env, bytes);
-                if ((*env)->ExceptionCheck(env))
-                    break;
+                if ((*env)->ExceptionCheck(env)) break;
             }
-            if ((*env)->ExceptionCheck(env))
-                break;
+            if ((*env)->ExceptionCheck(env)) break;
         }
+    }
+metadata_done:
+    for(jsize field=0;field<MAX_METADATA_FIELDS;field++) {
+        if(properties[field])(*env)->ReleaseStringUTFChars(env,key_objects[field],properties[field]);
+        if(key_objects[field])(*env)->DeleteLocalRef(env,key_objects[field]);
     }
     wimlib_free(wim);
     return values;

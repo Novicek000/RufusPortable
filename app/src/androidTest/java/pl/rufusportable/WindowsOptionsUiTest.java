@@ -90,6 +90,26 @@ public class WindowsOptionsUiTest {
             assertTrue(node("Utwórz konto lokalne").isChecked());
             assertTrue(node("Pomiń pytania o zbieranie danych").isChecked());
             assertEquals("Test User",node("Nazwa konta lokalnego").getLabelFor().getText().toString());
+            click("Ustaw język, region i strefę czasową");
+            String silent="Instalacja bezobsługowa — wymaż pierwszy dysk komputera";
+            click(silent);
+            AccessibilityNodeInfo edition=node("Edycja Windows").getLabelFor();assertNotNull(edition);
+            edition.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.getId());
+            assertTrue(edition.performAction(AccessibilityNodeInfo.ACTION_CLICK));
+            click("Windows Test Education · ARM64 · indeks 2");
+            click("Zastosuj");
+            await(()->node("Akceptuję i stosuję")!=null);
+            assertFalse(node("Akceptuję i stosuję").isEnabled());
+            click("Odłączę wszystkie dyski oprócz tego, na którym chcę zainstalować Windows.");
+            click("Nie pozostawię tego nośnika w komputerze, którego nie zamierzam wymazać.");
+            assertFalse(node("Akceptuję i stosuję").isEnabled());
+            click("Przyjmuję pełną odpowiedzialność za utratę danych wynikającą z użycia tej opcji.");
+            await(()->node("Akceptuję i stosuję").isEnabled());click("Akceptuję i stosuję");
+            await(()->node(silent)==null);
+            instrumentation.runOnMainSync(()->find(activity.getWindow().getDecorView(),"Instalacja Windows").performClick());
+            await(()->node(silent)!=null);assertTrue(node(silent).isChecked());
+            assertNotNull(node("Windows Test Education · ARM64 · indeks 2"));
+
         } finally {
             instrumentation.runOnMainSync(activity::finish);instrumentation.waitForIdleSync();assertTrue(source.delete());
         }

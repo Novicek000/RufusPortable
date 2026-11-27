@@ -45,18 +45,19 @@ public class MainActivity extends AppCompatActivity {
     private String volumeLabel="RUFUS";
     private WindowsProfile windowsProfile;
     private boolean windowsReviewed,windowsConfigured;
-    private int windowsFlags;
+    private int windowsFlags,windowsEditionIndex=1;
     private String windowsUser="",windowsLocale=Locale.getDefault().toLanguageTag(),windowsTimezone;
     private static final class WindowsProfile {
         final List<IsoTree.Entry> entries;
+        final List<WimMetadata.Image> editions;
         final int setupIndex,architecture,build;
         final String language;
         final boolean existingAnswer;
         WindowsProfile(List<IsoTree.Entry> entries) {
-            this.entries=entries;setupIndex=0;architecture=0;build=0;language="";existingAnswer=true;
+            this.entries=entries;editions=Collections.emptyList();setupIndex=0;architecture=0;build=0;language="";existingAnswer=true;
         }
-        WindowsProfile(List<IsoTree.Entry> entries,int index,WimMetadata.Image setup) throws IOException {
-            this.entries=entries;setupIndex=index;
+        WindowsProfile(List<IsoTree.Entry> entries,int index,WimMetadata.Image setup,List<WimMetadata.Image> editions) throws IOException {
+            this.entries=entries;this.editions=Collections.unmodifiableList(new ArrayList<>(editions));setupIndex=index;
             existingAnswer=entries.stream().anyMatch(e->!e.directory && e.path.equalsIgnoreCase("sources/$OEM$/$$/Panther/unattend.xml"));
             switch(setup.architecture) {
                 case "0":architecture=1;break;
@@ -102,7 +103,7 @@ public class MainActivity extends AppCompatActivity {
         f.addAction(UsbManager.ACTION_USB_DEVICE_DETACHED);
         androidx.core.content.ContextCompat.registerReceiver(this, receiver, f, androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED);
         if (state!=null) {
-            windowsFlags=state.getInt("windowsFlags");windowsUser=state.getString("windowsUser","");
+            windowsEditionIndex=state.getInt("windowsEdition",1);windowsFlags=state.getInt("windowsFlags");windowsUser=state.getString("windowsUser","");
             windowsLocale=state.getString("windowsLocale",Locale.getDefault().toLanguageTag());
             windowsTimezone=state.getString("windowsTimezone");windowsConfigured=state.getBoolean("windowsConfigured");
             windowsReviewed=state.getBoolean("windowsReviewed");
@@ -119,7 +120,7 @@ public class MainActivity extends AppCompatActivity {
     @Override protected void onSaveInstanceState(Bundle state) {
         super.onSaveInstanceState(state);
         if (pickedUri!=null) state.putString("source",pickedUri.toString());
-        state.putInt("windowsFlags",windowsFlags);state.putString("windowsUser",windowsUser);
+        state.putInt("windowsEdition",windowsEditionIndex);state.putInt("windowsFlags",windowsFlags);state.putString("windowsUser",windowsUser);
         state.putString("windowsLocale",windowsLocale);state.putString("windowsTimezone",windowsTimezone);
         state.putBoolean("windowsConfigured",windowsConfigured);state.putBoolean("windowsReviewed",windowsReviewed);
         state.putBoolean("builtin",image!=null && image.uri==null); state.putBoolean("dos",dos); state.putBoolean("testMedia",testMedia);
@@ -402,7 +403,14 @@ public class MainActivity extends AppCompatActivity {
                     try(ProxyImageFile proxy=new ProxyImageFile(this,selected,boot)) {images=WimMetadata.read(proxy.path());}
                     if(images.isEmpty())throw new IOException("boot.wim nie zawiera obrazów Windows.");
                     int index=images.size()>=2?2:1;
-                    profile=new WindowsProfile(entries,index,images.get(index-1));
+                    List<WimMetadata.Image> editions=Collections.emptyList();
+                    IsoTree.Entry install=entries.stream().filter(e->!e.directory &&
+                            (e.path.equalsIgnoreCase("sources/install.wim") || e.path.equalsIgnoreCase("sources/install.esd")))
+                            .findFirst().orElse(null);
+                    if(install!=null)try(ProxyImageFile proxy=new ProxyImageFile(this,selected,install)) {
+                        editions=WimMetadata.read(proxy.path());
+                    }
+                    profile=new WindowsProfile(entries,index,images.get(index-1),editions);
                 }
                 ui(()->{
                     windowsProfile=profile;
@@ -416,7 +424,7 @@ public class MainActivity extends AppCompatActivity {
     }
     private WindowsUnattend.Options windowsSettings(int flags,String user,String locale,String timezone) {
         WindowsUnattend.Options options=new WindowsUnattend.Options();
-        options.flags=flags;options.username=user;options.architecture=windowsProfile.architecture;
+        options.flags=flags;options.editionIndex=windowsEditionIndex;options.username=user;options.architecture=windowsProfile.architecture;
         options.inputLocale=locale;options.systemLocale=locale;options.userLocale=locale;options.uiLanguage=locale;
         options.timezone=timezone;options.fallbackLanguage=windowsProfile.language;options.setupLanguage=windowsProfile.language;
         return options;
@@ -463,6 +471,27 @@ public class MainActivity extends AppCompatActivity {
         Spinner timezone=choices(regionBox,"Strefa czasowa Windows",zones.windows.toArray(new String[0]),Math.max(0,selected));
         regionBox.setVisibility(checks[4].isChecked()?View.VISIBLE:View.GONE);
         checks[4].setOnCheckedChangeListener((v,checked)->regionBox.setVisibility(checked?View.VISIBLE:View.GONE));
+        LinearLayout silentBox=column();box.addView(silentBox);
+        CheckBox silent=checkbox("Instalacja bezobsługowa — wymaż pierwszy dysk komputera",(windowsFlags&WindowsUnattend.SILENT_INSTALL)!=0);
+        silentBox.addView(silent);
+        String[] editionNames=new String[windowsProfile.editions.size()];int selectedEdition=0;
+        for(int i=0;i<editionNames.length;i++) {
+            WimMetadata.Image edition=windowsProfile.editions.get(i);
+            editionNames[i]=edition.editionName()+" · "+edition.platform()+" · indeks "+edition.index;
+            if(edition.index==windowsEditionIndex)selectedEdition=i;
+        }
+        Spinner edition=choices(silentBox,"Edycja Windows",editionNames,selectedEdition);
+        edition.setEnabled(silent.isChecked());
+        silent.setOnCheckedChangeListener((v,checked)->edition.setEnabled(checked));
+        Runnable refreshSilent=()->{
+            boolean available=windowsProfile.build>=22000 && checks[2].isChecked() && checks[3].isChecked() && checks[4].isChecked() && editionNames.length>0;
+            silentBox.setVisibility(available?View.VISIBLE:View.GONE);
+            if(!available)silent.setChecked(false);
+        };
+        checks[2].setOnCheckedChangeListener((v,checked)->{account.setEnabled(checked);refreshSilent.run();});
+        checks[3].setOnCheckedChangeListener((v,checked)->refreshSilent.run());
+        checks[4].setOnCheckedChangeListener((v,checked)->{regionBox.setVisibility(checked?View.VISIBLE:View.GONE);refreshSilent.run();});
+        refreshSilent.run();
         ScrollView scroll=new ScrollView(this);scroll.addView(box);
         var dialog=new MaterialAlertDialogBuilder(this).setTitle("Instalacja Windows").setView(scroll)
                 .setNegativeButton("Anuluj",null).setPositiveButton("Zastosuj",null).show();
@@ -476,12 +505,37 @@ public class MainActivity extends AppCompatActivity {
             if(checks[4].isChecked() && !region.matches("[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})*")) {
                 locale.setError("Wpisz oznaczenie języka i regionu, np. pl-PL.");return;
             }
-            try {WindowsUnattend.validate(windowsSettings(flags,user,region,zone));}
+            if(silent.isChecked())flags|=WindowsUnattend.SILENT_INSTALL;
+            int editionIndex=edition.getSelectedItemPosition()>=0?windowsProfile.editions.get(edition.getSelectedItemPosition()).index:1;
+            try {
+                WindowsUnattend.Options options=windowsSettings(flags,user,region,zone);options.editionIndex=editionIndex;
+                WindowsUnattend.validate(options);
+            }
             catch(IOException error){account.setError(error.getMessage());return;}
-            windowsFlags=flags;windowsUser=user;windowsLocale=region;windowsTimezone=zone;
-            windowsConfigured=true;windowsReviewed=true;dialog.dismiss();
-            status.setText(flags==0?"Wybrano standardową instalację Windows.":"Zapis uwzględni wybrane ustawienia Windows.");
-            if(afterApply!=null)afterApply.run();
+            final int selectedFlags=flags;
+            Runnable apply=()->{
+                windowsFlags=selectedFlags;windowsEditionIndex=editionIndex;windowsUser=user;windowsLocale=region;windowsTimezone=zone;
+                windowsConfigured=true;windowsReviewed=true;dialog.dismiss();
+                status.setText(selectedFlags==0?"Wybrano standardową instalację Windows.":"Zapis uwzględni wybrane ustawienia Windows.");
+                if(afterApply!=null)afterApply.run();
+            };
+            if(silent.isChecked())confirmSilentInstallation(apply);else apply.run();
+        });
+    }
+    private void confirmSilentInstallation(Runnable apply) {
+        LinearLayout box=column();pad(box,20,8);
+        label(box,"Ten nośnik uruchomi instalację Windows bez pytań i BEZWARUNKOWO WYMAŻE pierwszy wykryty dysk komputera (dysk 0). Może to spowodować NIEODWRACALNĄ UTRATĘ DANYCH. Przeczytaj i zaakceptuj wszystkie poniższe oświadczenia, aby kontynuować.",16,false);
+        String[] titles={"Odłączę wszystkie dyski oprócz tego, na którym chcę zainstalować Windows.",
+                "Nie pozostawię tego nośnika w komputerze, którego nie zamierzam wymazać.",
+                "Przyjmuję pełną odpowiedzialność za utratę danych wynikającą z użycia tej opcji."};
+        CheckBox[] acknowledgements=new CheckBox[titles.length];
+        for(int i=0;i<titles.length;i++){acknowledgements[i]=checkbox(titles[i],false);box.addView(acknowledgements[i]);}
+        ScrollView scroll=new ScrollView(this);scroll.addView(box);
+        var warning=new MaterialAlertDialogBuilder(this).setTitle("Instalacja bezobsługowa usuwa dane")
+                .setView(scroll).setNegativeButton("Wróć",null).setPositiveButton("Akceptuję i stosuję",(d,w)->apply.run()).show();
+        warning.getButton(-1).setEnabled(false);
+        for(CheckBox check:acknowledgements)check.setOnCheckedChangeListener((v,checked)->{
+            boolean all=true;for(CheckBox item:acknowledgements)all&=item.isChecked();warning.getButton(-1).setEnabled(all);
         });
     }
     private boolean connected(UsbDevice device) {
@@ -577,6 +631,7 @@ public class MainActivity extends AppCompatActivity {
         String confirmation="\n\n"+method+
                 (useIso && appliedWindowsFlags!=0?"\nPersonalizacja Windows: "+Integer.bitCount(appliedWindowsFlags)+" opcji":"")+
                 (useIso && (appliedWindowsFlags&WindowsUnattend.SET_USER)!=0?"\nKonto lokalne: "+windowsUser:"")+(testMedia?"\nTest bloków: "+BadBlocks.OPTIONS[badBlockOption]+(detectFakeMedia?" · wykrywanie fałszywej pojemności":""):"")
+                +((useIso && (appliedWindowsFlags&WindowsUnattend.SILENT_INSTALL)!=0)?"\nINSTALACJA BEZOBSŁUGOWA: po rozruchu zostanie wymazany dysk 0 komputera. Edycja: indeks "+windowsEditionIndex:" ")
                 +"\nZapis zastąpi dane na tym nośniku."
                 +(image.uri!=null?" Plik źródłowy musi znajdować się poza wybranym pendrivem.":"")
                 +" Pozostaw aplikację otwartą do zakończenia operacji.";

@@ -40,6 +40,10 @@ public final class WindowsUnattendTest {
             check(full.getElementsByTagName("SanPolicy").item(0).getTextContent().equals("4"),"internal drives offline");
             check(full.getElementsByTagName("SkuPolicyRequired").getLength()==1,"S mode");
             check(full.getElementsByTagName("WillWipeDisk").getLength()==1,"silent install disk configuration");
+            Element metadata=(Element)full.getElementsByTagName("MetaData").item(0);
+            check(metadata.getElementsByTagName("Key").item(0).getTextContent().equals("/IMAGE/INDEX") &&
+                    metadata.getElementsByTagName("Value").item(0).getTextContent().equals("4"),"selected install edition index");
+            check(full.getElementsByTagName("InstallTo").item(0).getTextContent().replaceAll("\\s","").equals("03"),"silent install disk 0 partition 3");
             check(full.getDocumentElement().getTextContent().contains("SkuSiPolicy.p7b"),"secure boot policy command");
         }
         options.architecture=0;

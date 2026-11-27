@@ -13,10 +13,12 @@ rm -f "$metadata"
 "$wim_tool" append "$output_dir/capture" "$metadata" 'Windows Test 😀' 'Second test image'
 "$wim_tool" info "$metadata" 1 --image-property=WINDOWS/ARCH=9 \
     --image-property=WINDOWS/EDITIONID=Professional --image-property=WINDOWS/VERSION/BUILD=26100 \
-    --image-property=WINDOWS/LANGUAGES/LANGUAGE=en-US
+    --image-property=WINDOWS/LANGUAGES/LANGUAGE=en-US \
+    --image-property=DISPLAYNAME='Windows Test Pro'
 "$wim_tool" info "$metadata" 2 --image-property=WINDOWS/ARCH=12 \
     --image-property=WINDOWS/EDITIONID=Professional --image-property=WINDOWS/VERSION/BUILD=26100 \
-    --image-property=WINDOWS/LANGUAGES/LANGUAGE=en-US
+    --image-property=WINDOWS/LANGUAGES/LANGUAGE=en-US \
+    --image-property=DISPLAYNAME='Windows Test Education'
 cp "$metadata" "$output_dir/iso/sources/boot.wim"
 cp "$metadata" "$output_dir/iso/sources/install.wim"
 printf 'Original dummy boot manager.\n' > "$output_dir/iso/bootmgr"
