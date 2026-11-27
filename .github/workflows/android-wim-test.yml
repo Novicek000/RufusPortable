@@ -31,6 +31,8 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
       - name: Install native build dependencies
         run: |
           sudo apt-get update
@@ -39,7 +41,7 @@ jobs:
       - name: Build APKs and test native WIM metadata
         run: |
           export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018"
-          ./gradlew assembleDebug assembleDebugAndroidTest --max-workers=2
+          ./gradlew assembleDebug assembleDebugAndroidTest testDebugUnitTest lintRelease --max-workers=2
           bash scripts/test-native-wim.sh
       - name: Enable runner KVM access
         run: |
