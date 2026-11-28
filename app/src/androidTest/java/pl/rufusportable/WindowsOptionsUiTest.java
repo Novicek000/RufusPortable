@@ -127,7 +127,11 @@ public class WindowsOptionsUiTest {
             instrumentation.runOnMainSync(()->find(activity.getWindow().getDecorView(),"Opcje zapisu").performClick());
             await(()->node("Tryb Windows")!=null);
             AccessibilityNodeInfo mode=node("Tryb Windows").getLabelFor();assertNotNull(mode);
-            assertTrue(mode.performAction(AccessibilityNodeInfo.ACTION_CLICK));click("Windows To Go — system uruchamiany z USB");click("Zastosuj");
+            assertTrue(mode.performAction(AccessibilityNodeInfo.ACTION_CLICK));click("Windows To Go — system uruchamiany z USB");
+            await(()->node("Rozruch Windows To Go")!=null);
+            AccessibilityNodeInfo firmware=node("Rozruch Windows To Go").getLabelFor();assertNotNull(firmware);
+            firmware.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.getId());
+            assertTrue(firmware.performAction(AccessibilityNodeInfo.ACTION_CLICK));click("Tylko UEFI");click("Zastosuj");
             await(()->node("Tryb Windows")==null);
             instrumentation.runOnMainSync(()->find(activity.getWindow().getDecorView(),"Instalacja Windows").performClick());
             await(()->node("Pozostaw wewnętrzne dyski komputera offline")!=null);
@@ -141,6 +145,8 @@ public class WindowsOptionsUiTest {
             await(()->node("Windows Test Education · ARM64 · indeks 2")!=null);
             assertTrue(node("Pozostaw wewnętrzne dyski komputera offline").isChecked());
             click("Anuluj");
+            instrumentation.runOnMainSync(()->find(activity.getWindow().getDecorView(),"Opcje zapisu").performClick());
+            await(()->node("Tylko UEFI")!=null);click("Anuluj");
         } finally {instrumentation.runOnMainSync(activity::finish);instrumentation.waitForIdleSync();assertTrue(source.delete());}
     }
 }

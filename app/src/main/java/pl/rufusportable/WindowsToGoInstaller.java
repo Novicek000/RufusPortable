@@ -6,6 +6,15 @@ import java.util.*;
 /** Native WIM -> NTFS -> Windows boot configuration; no installer or third-party boot manager. */
 final class WindowsToGoInstaller {
     interface Progress {void update(String phase,String path,long done,long total) throws IOException;}
+    /** firmware: 0=available image boot files, 1=UEFI, 2=BIOS. Result: BIOS bit 0, UEFI bit 1. */
+    static int selectBoot(int capabilities,boolean gpt,int firmware) throws IOException {
+        if(capabilities<0 || capabilities>3 || firmware<0 || firmware>2)throw new IOException("Nieprawidłowy wybór rozruchu Windows To Go.");
+        if(gpt && firmware==2)throw new IOException("Rozruch BIOS wymaga schematu MBR.");
+        int requested=gpt || firmware==1?2:firmware==2?1:capabilities;
+        if(requested==0 || (capabilities&requested)!=requested)
+            throw new IOException(gpt?"Wybrany Windows nie obsługuje UEFI. Wybierz MBR i rozruch BIOS.":"Obraz nie zawiera plików dla wybranego rodzaju rozruchu.");
+        return requested;
+    }
     static BlockDevice partition(BlockDevice disk,WindowsToGoLayout.Partition part) throws IOException {
         if(part==null || part.offset<0 || part.length<=0 || part.offset%disk.sectorSize()!=0 ||
                 part.length%disk.sectorSize()!=0 || part.offset>disk.size() || part.length>disk.size()-part.offset)

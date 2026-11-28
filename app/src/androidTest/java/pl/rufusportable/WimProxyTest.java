@@ -44,6 +44,8 @@ public class WimProxyTest {
                 assertEquals("26100",images.get(0).build);
                 assertEquals("Windows Test 😀",images.get(1).name);
                 assertEquals("ARM64",images.get(1).platform());
+                assertArrayEquals(new boolean[]{true,true,false},WimMetadata.containsFiles(proxy.path(),1,"README.TXT","readme.txt","missing.txt"));
+                assertEquals(0,WimMetadata.bootCapabilities(proxy.path(),1,false));
                 assertNull(proxy.sourceFailure());
                 assertEquals(2,WimMetadata.read(proxy.path()).size());
             }

@@ -19,7 +19,7 @@ static int initialization_error;
 
 static void initialize_wim(void)
 {
-    initialization_error = wimlib_global_init(WIMLIB_INIT_FLAG_ASSUME_UTF8);
+    initialization_error = wimlib_global_init(WIMLIB_INIT_FLAG_ASSUME_UTF8|WIMLIB_INIT_FLAG_DEFAULT_CASE_INSENSITIVE);
 }
 
 static void throw_error(JNIEnv *env, const char *message)
@@ -117,6 +117,34 @@ static char *utf8_path(JNIEnv *env, jbyteArray array)
     if (memchr(path,0,length)) {free(path);throw_error(env,"NUL in WIM path");return NULL;}
     path[length]=0;
     return path;
+}
+
+static int found_regular_file(const struct wimlib_dir_entry *entry,void *context)
+{
+    jboolean *found=context;
+    *found=!(entry->attributes&(WIMLIB_FILE_ATTRIBUTE_DIRECTORY|WIMLIB_FILE_ATTRIBUTE_REPARSE_POINT));
+    return 0;
+}
+JNIEXPORT jbooleanArray JNICALL Java_pl_rufusportable_WimMetadata_probeFiles(
+        JNIEnv *env,jclass type,jstring filename,jint image,jobjectArray targets)
+{
+    (void)type;pthread_once(&initialization,initialize_wim);
+    if(initialization_error){throw_error(env,wimlib_get_error_string(initialization_error));return NULL;}
+    jsize count=targets?(*env)->GetArrayLength(env,targets):0;
+    if(!filename || image<1 || count<1 || count>32){throw_error(env,"Invalid WIM file probe");return NULL;}
+    const char *path=(*env)->GetStringUTFChars(env,filename,NULL);if(!path)return NULL;
+    WIMStruct *wim=NULL;int result=wimlib_open_wim(path,0,&wim);
+    (*env)->ReleaseStringUTFChars(env,filename,path);
+    if(result){throw_error(env,wimlib_get_error_string(result));return NULL;}
+    jboolean found[32]={0};jbooleanArray output=NULL;
+    for(jsize i=0;i<count;i++) {
+        jbyteArray target=(*env)->GetObjectArrayElement(env,targets,i);if(!target){throw_error(env,"Missing WIM target path");goto done;}
+        char *name=utf8_path(env,target);(*env)->DeleteLocalRef(env,target);if(!name)goto done;
+        result=wimlib_iterate_dir_tree(wim,image,name,0,found_regular_file,&found[i]);free(name);
+        if(result && result!=WIMLIB_ERR_PATH_DOES_NOT_EXIST){throw_error(env,wimlib_get_error_string(result));goto done;}
+    }
+    output=(*env)->NewBooleanArray(env,count);if(output)(*env)->SetBooleanArrayRegion(env,output,0,count,found);
+done:wimlib_free(wim);return output;
 }
 
 JNIEXPORT jlong JNICALL Java_pl_rufusportable_WimMetadata_update(

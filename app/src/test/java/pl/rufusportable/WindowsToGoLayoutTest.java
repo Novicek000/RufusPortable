@@ -89,4 +89,24 @@ public class WindowsToGoLayoutTest {
         values.remove("TOTALBYTES");
         assertThrows(IOException.class,()->WindowsToGoInstaller.requireCapacity(new WimMetadata.Image(1,values),32L<<30,4096));
     }
+    @Test public void legacyOnlyImagesDoNotAcquireAnUnusableUefiTarget() throws Exception {
+        assertEquals(1,WindowsToGoInstaller.selectBoot(1,false,0));
+        assertEquals(2,WindowsToGoInstaller.selectBoot(2,false,0));
+        assertEquals(3,WindowsToGoInstaller.selectBoot(3,false,0));
+        assertEquals(2,WindowsToGoInstaller.selectBoot(3,true,0));
+        assertEquals(2,WindowsToGoInstaller.selectBoot(3,false,1));
+        assertEquals(1,WindowsToGoInstaller.selectBoot(3,false,2));
+        assertThrows(IOException.class,()->WindowsToGoInstaller.selectBoot(1,true,0));
+        assertThrows(IOException.class,()->WindowsToGoInstaller.selectBoot(1,false,1));
+        assertThrows(IOException.class,()->WindowsToGoInstaller.selectBoot(2,false,2));
+        assertThrows(IOException.class,()->WindowsToGoInstaller.selectBoot(3,true,2));
+        assertThrows(IOException.class,()->WindowsToGoInstaller.selectBoot(0,false,0));
+    }
+    @Test public void uefiOnlyMbrUsesRufusMarkerAndZeroBootCode() throws Exception {
+        byte[] mbr=new byte[440];Arrays.fill(mbr,(byte)0x7f);
+        WindowsToGoLayout disk=WindowsToGoLayout.create(32L<<30,512,4096,false,mbr,new byte[1048576],true);
+        byte[] first=at(disk,0);assertArrayEquals(new byte[440],Arrays.copyOf(first,440));
+        assertEquals(0x49464555,le(first).getInt(440));assertEquals(disk.diskSignature,le(WindowsBootConfiguration.device(disk,disk.main)).getInt(56));
+        assertThrows(IOException.class,()->WindowsToGoLayout.create(32L<<30,512,4096,false,mbr,null,true));
+    }
 }

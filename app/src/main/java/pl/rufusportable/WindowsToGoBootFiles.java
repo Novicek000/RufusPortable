@@ -26,12 +26,15 @@ final class WindowsToGoBootFiles {
         int slash=target.lastIndexOf('/');if(slash>=0)directory(target.substring(0,slash));add(target,true,0,null);
     }
     private void tree(String source,String target,int depth) throws IOException {
+        tree(source,target,depth,false);
+    }
+    private void tree(String source,String target,int depth,boolean stripEx) throws IOException {
         if(depth>32)throw new IOException("Zbyt głęboka struktura plików rozruchowych Windows.");
         directory(target);
         for(NtfsVolume.Entry item:windows.list(source)) {
             if(item.reparse)throw new IOException("Nieoczekiwany punkt ponownej analizy w plikach rozruchowych: "+source+"/"+item.name);
-            String from=source+"/"+item.name,to=target+"/"+item.name;
-            if(item.directory)tree(from,to,depth+1);else add(to,false,item.size,new FileSource(from,null));
+            String from=source+"/"+item.name,to=target+"/"+(stripEx?item.name.replaceAll("(?i)_EX",""):item.name);
+            if(item.directory)tree(from,to,depth+1,stripEx);else add(to,false,item.size,new FileSource(from,null));
         }
     }
     private NtfsVolume.Entry child(String directory,String name) throws IOException {
@@ -102,10 +105,10 @@ final class WindowsToGoBootFiles {
             File template=scratch.resolve("BCD-Template").toFile();extractHive("Windows/System32/config/BCD-Template",template);
             String suffix=bootex && child("Windows/Boot","EFI_EX")!=null?"_EX":"";
             if(efi) {
-                tree("Windows/Boot/EFI"+suffix,"EFI/Microsoft/Boot",0);
-                tree("Windows/Boot/Fonts"+suffix,"EFI/Microsoft/Boot/Fonts",0);
+                tree("Windows/Boot/EFI"+suffix,"EFI/Microsoft/Boot",0,!suffix.isEmpty());
+                tree("Windows/Boot/Fonts"+suffix,"EFI/Microsoft/Boot/Fonts",0,!suffix.isEmpty());
                 if(child("Windows/Boot","Resources")!=null)tree("Windows/Boot/Resources","EFI/Microsoft/Boot/Resources",0);
-                directory("EFI/Boot");copyFile("Windows/Boot/EFI"+suffix+"/bootmgfw.efi","EFI/Boot/"+fallback);
+                directory("EFI/Boot");copyFile("Windows/Boot/EFI"+suffix+"/bootmgfw"+suffix+".efi","EFI/Boot/"+fallback);
                 File bcd=scratch.resolve("BCD-UEFI").toFile();WindowsBootConfiguration.create(template,bcd,layout,true,locale,title);
                 add("EFI/Microsoft/Boot/BCD",false,bcd.length(),new FileSource(null,bcd));
             }

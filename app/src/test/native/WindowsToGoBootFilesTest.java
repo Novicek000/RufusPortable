@@ -31,8 +31,8 @@ public final class WindowsToGoBootFilesTest {
             hive.putDword("ControlSet002\\Services\\partmgr\\Parameters","SanPolicy",1);hive.commit(system);
         }
         Map<String,byte[]> payloads=new LinkedHashMap<>();
-        for(String path:new String[]{"EFI/bootmgfw.efi","EFI/memtest.efi","EFI/en-US/bootmgfw.efi.mui","EFI_EX/bootmgfw.efi","EFI_EX/memtest.efi",
-                "Fonts/wgl4_boot.ttf","Fonts_EX/wgl4_boot.ttf","PCAT/bootmgr","PCAT/memtest.exe","Resources/bootres.dll"})
+        for(String path:new String[]{"EFI/bootmgfw.efi","EFI/memtest.efi","EFI/en-US/bootmgfw.efi.mui","EFI_EX/bootmgfw_EX.efi","EFI_EX/memtest_EX.efi",
+                "Fonts/wgl4_boot.ttf","Fonts_EX/wgl4_boot_EX.ttf","PCAT/bootmgr","PCAT/memtest.exe","Resources/bootres.dll"})
             payloads.put("Windows/Boot/"+path,("Original test bytes: "+path+" żółć 😀").getBytes(java.nio.charset.StandardCharsets.UTF_8));
         for(int sector:new int[]{512,4096})for(boolean gpt:new boolean[]{false,true}) {
             if(!gpt && sector==4096)continue;
@@ -63,7 +63,7 @@ public final class WindowsToGoBootFilesTest {
                     }
                     if(!gpt) {
                         try(InputStream input=volume.open("bootmgr")){check(Arrays.equals(payloads.get("Windows/Boot/PCAT/bootmgr"),input.readAllBytes()),"BIOS bootmgr");}
-                        try(InputStream input=volume.open("EFI/Boot/bootx64.efi")){check(Arrays.equals(payloads.get("Windows/Boot/EFI_EX/bootmgfw.efi"),input.readAllBytes()),"CA2023 fallback");}
+                        try(InputStream input=volume.open("EFI/Boot/bootx64.efi")){check(Arrays.equals(payloads.get("Windows/Boot/EFI_EX/bootmgfw_EX.efi"),input.readAllBytes()),"CA2023 fallback");}
                         for(String path:new String[]{"Boot/BCD","EFI/Microsoft/Boot/BCD"})try(InputStream input=volume.open(path)){Files.copy(input,directory.resolve(name+"-"+path.replace('/','-')),StandardCopyOption.REPLACE_EXISTING);}
                     }
                 }
@@ -75,8 +75,8 @@ public final class WindowsToGoBootFilesTest {
             try(var paths=Files.list(directory)){check(paths.noneMatch(p->p.getFileName().toString().startsWith("wintogo-registry-")),"Registry scratch leaked");}
         }
         Path expected=directory.resolve("expected");Files.createDirectories(expected);
-        for(String[] mapping:new String[][]{{"EFI_EX/bootmgfw.efi","EFI/Boot/bootx64.efi"},{"EFI_EX/bootmgfw.efi","EFI/Microsoft/Boot/bootmgfw.efi"},
-                {"EFI_EX/memtest.efi","EFI/Microsoft/Boot/memtest.efi"},{"Fonts_EX/wgl4_boot.ttf","EFI/Microsoft/Boot/Fonts/wgl4_boot.ttf"},
+        for(String[] mapping:new String[][]{{"EFI_EX/bootmgfw_EX.efi","EFI/Boot/bootx64.efi"},{"EFI_EX/bootmgfw_EX.efi","EFI/Microsoft/Boot/bootmgfw.efi"},
+                {"EFI_EX/memtest_EX.efi","EFI/Microsoft/Boot/memtest.efi"},{"Fonts_EX/wgl4_boot_EX.ttf","EFI/Microsoft/Boot/Fonts/wgl4_boot.ttf"},
                 {"Resources/bootres.dll","EFI/Microsoft/Boot/Resources/bootres.dll"}}) {
             Path path=expected.resolve(mapping[1]);Files.createDirectories(path.getParent());Files.write(path,payloads.get("Windows/Boot/"+mapping[0]));
         }

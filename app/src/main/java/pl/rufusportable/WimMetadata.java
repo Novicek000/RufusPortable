@@ -61,6 +61,24 @@ final class WimMetadata {
         return Collections.unmodifiableList(images);
     }
 
+    static boolean[] containsFiles(String wim,int image,String... paths) throws IOException {
+        if(image<1 || paths==null || paths.length<1 || paths.length>32)throw new IOException("Nieprawidłowe zapytanie o pliki WIM.");
+        byte[][] names=new byte[paths.length][];
+        for(int i=0;i<paths.length;i++) {
+            String path=paths[i];
+            if(path==null || path.isEmpty() || path.startsWith("/") || path.indexOf(0)>=0 || path.indexOf('\\')>=0 ||
+                    Arrays.asList(path.split("/",-1)).stream().anyMatch(p->p.isEmpty() || p.equals(".") || p.equals("..")))
+                throw new IOException("Nieprawidłowa ścieżka pliku WIM.");
+            names[i]=path.getBytes(StandardCharsets.UTF_8);
+        }
+        return probeFiles(wim,image,names);
+    }
+    private static native boolean[] probeFiles(String path,int image,byte[][] targets) throws IOException;
+    static int bootCapabilities(String path,int image,boolean bootex) throws IOException {
+        boolean[] files=containsFiles(path,image,"Windows/Boot/PCAT/bootmgr","Windows/Boot/EFI/bootmgfw.efi","Windows/Boot/EFI_EX/bootmgfw_EX.efi");
+        return (files[0]?1:0)|((files[1] || (bootex && files[2]))?2:0);
+    }
+
     static long addFile(String wimPath,int image,String source,String target) throws IOException {
         if(image<1 || target.isEmpty() || target.startsWith("/") || target.contains("\\") ||
                 Arrays.asList(target.split("/",-1)).stream().anyMatch(p->p.isEmpty() || p.equals(".") || p.equals("..")))

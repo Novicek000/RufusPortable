@@ -47,6 +47,7 @@ public class MainActivity extends AppCompatActivity {
     private String volumeLabel="RUFUS";
     private WindowsProfile windowsProfile;
     private boolean windowsReviewed,windowsConfigured,windowsToGo;
+    private int windowsFirmware;
     private int windowsFlags,windowsEditionIndex=1;
     private String windowsUser="",windowsLocale=Locale.getDefault().toLanguageTag(),windowsTimezone;
     private static final class WindowsProfile {
@@ -110,6 +111,7 @@ public class MainActivity extends AppCompatActivity {
             windowsTimezone=state.getString("windowsTimezone");windowsConfigured=state.getBoolean("windowsConfigured");
             windowsReviewed=state.getBoolean("windowsReviewed");
             windowsToGo=state.getBoolean("windowsToGo");
+            windowsFirmware=state.getInt("windowsFirmware");
             gpt=state.getBoolean("gpt"); verifyWrite=state.getBoolean("verify",true);
             ntfsClusterSize=state.getInt("ntfsCluster",4096); quickFormat=state.getBoolean("quick",true); volumeLabel=state.getString("label","RUFUS");
             String saved=state.getString("source");
@@ -127,6 +129,7 @@ public class MainActivity extends AppCompatActivity {
         state.putString("windowsLocale",windowsLocale);state.putString("windowsTimezone",windowsTimezone);
         state.putBoolean("windowsConfigured",windowsConfigured);state.putBoolean("windowsReviewed",windowsReviewed);
         state.putBoolean("windowsToGo",windowsToGo);
+        state.putInt("windowsFirmware",windowsFirmware);
         state.putBoolean("builtin",image!=null && image.uri==null); state.putBoolean("dos",dos); state.putBoolean("testMedia",testMedia);
         state.putBoolean("iso",useIso); state.putBoolean("gpt",gpt); state.putBoolean("verify",verifyWrite);
         state.putInt("badBlockOption",badBlockOption);state.putBoolean("detectFakes",detectFakeMedia);
@@ -301,6 +304,14 @@ public class MainActivity extends AppCompatActivity {
         LinearLayout isoBox=column(); box.addView(isoBox);
         Spinner windowsMode=choices(isoBox,"Tryb Windows",new String[]{"Standardowa instalacja Windows","Windows To Go — system uruchamiany z USB"},windowsToGo?1:0);
         Spinner scheme=choices(isoBox,"Schemat partycji",new String[]{"MBR","GPT"},gpt?1:0);
+        LinearLayout firmwareBox=column();isoBox.addView(firmwareBox);
+        Spinner firmware=choices(firmwareBox,"Rozruch Windows To Go",new String[]{"Automatycznie według obrazu","Tylko UEFI","Tylko BIOS"},windowsFirmware);
+        TextView firmwareError=label(firmwareBox,"",14,false);
+        firmwareBox.setVisibility(windowsToGo?View.VISIBLE:View.GONE);
+        windowsMode.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            public void onNothingSelected(AdapterView<?> parent){}
+            public void onItemSelected(AdapterView<?> parent,View view,int position,long id){firmwareBox.setVisibility(position==1?View.VISIBLE:View.GONE);}
+        });
         int[] clusterSizes={512,1024,2048,4096,8192,16384,32768,65536,131072,262144,524288,1048576,2097152};
         int clusterIndex=3;
         for(int i=0;i<clusterSizes.length;i++) if(clusterSizes[i]==ntfsClusterSize) clusterIndex=i;
@@ -331,12 +342,14 @@ public class MainActivity extends AppCompatActivity {
                 .setNegativeButton("Anuluj",null).setPositiveButton("Zastosuj",null).show();
         dialog.getButton(-1).setOnClickListener(v->{
             boolean iso=switchable?mode.getSelectedItemPosition()==1:useIso;
+            boolean toGo=windowsMode.getSelectedItemPosition()==1;
+            if(toGo && scheme.getSelectedItemPosition()==1 && firmware.getSelectedItemPosition()==2){firmwareError.setText("Rozruch BIOS wymaga schematu MBR.");return;}
             String label=volume.getText().toString().trim();
             if (iso && !WindowsInstaller.validLabel(label)) { volume.setError("Etykieta NTFS może mieć do 32 znaków."); return; }
             if (image.uri==null && !label.matches("[a-zA-Z0-9 _-]{1,11}")) {volume.setError("Wpisz do 11 liter ASCII, cyfr, spacji, - lub _."); return;}
             useIso=iso; if (iso || image.uri==null) volumeLabel=label; testMedia=surface.isChecked();
-            boolean toGo=windowsMode.getSelectedItemPosition()==1;
             if(windowsToGo!=toGo){windowsToGo=toGo;windowsProfile=null;windowsReviewed=false;windowsConfigured=false;}
+            windowsFirmware=firmware.getSelectedItemPosition();
             badBlockOption=patterns.getSelectedItemPosition();detectFakeMedia=fakes.isChecked();
             gpt=scheme.getSelectedItemPosition()==1; ntfsClusterSize=clusterSizes[clusters.getSelectedItemPosition()]; quickFormat=quick.isChecked();
             verifyWrite=verify.isChecked(); showImage(); dialog.dismiss();
@@ -658,6 +671,7 @@ public class MainActivity extends AppCompatActivity {
                 useIso?(windowsToGo?"Windows To Go · ":"")+(gpt?"GPT":"MBR")+" · NTFS · "+volumeLabel:"Zapis sektorowy DD";
         int appliedWindowsFlags=windowsProfile!=null && (windowsToGo || !windowsProfile.existingAnswer)?windowsFlags:0;
         String confirmation="\n\n"+method+
+                (useIso && windowsToGo?"\nRozruch: "+(windowsFirmware==1?"tylko UEFI":windowsFirmware==2?"tylko BIOS":"według plików obrazu")+"\nEdycja Windows: indeks "+windowsEditionIndex:"")+
                 (useIso && appliedWindowsFlags!=0?"\nPersonalizacja Windows: "+Integer.bitCount(appliedWindowsFlags)+" opcji":"")+
                 (useIso && (appliedWindowsFlags&WindowsUnattend.SET_USER)!=0?"\nKonto lokalne: "+windowsUser:"")+(testMedia?"\nTest bloków: "+BadBlocks.OPTIONS[badBlockOption]+(detectFakeMedia?" · wykrywanie fałszywej pojemności":""):"")
                 +((useIso && (appliedWindowsFlags&WindowsUnattend.SILENT_INSTALL)!=0)?"\nINSTALACJA BEZOBSŁUGOWA: po rozruchu zostanie wymazany dysk 0 komputera. Edycja: indeks "+windowsEditionIndex:" ")
@@ -787,8 +801,6 @@ public class MainActivity extends AppCompatActivity {
                 (e.path.equalsIgnoreCase("sources/install.wim") || e.path.equalsIgnoreCase("sources/install.esd")))
                 .findFirst().orElseThrow(()->new IOException("Brak źródłowego install.wim lub install.esd."));
         WindowsUnattend.Options options=windowsSettings(windowsFlags,windowsUser,windowsLocale,windowsTimezone);
-        WindowsToGoLayout layout=WindowsToGoLayout.create(disk.capacity,disk.blockSize,ntfsClusterSize,gpt,
-                bootResource("mbr_win7.bin"),gpt?null:bootResource("uefi-ntfs.img"));
         BlockDevice raw=disk.partition(0,disk.capacity);
         BlockDevice device=new BlockDevice() {
             public long size(){return raw.size();}public int sectorSize(){return raw.sectorSize();}
@@ -801,12 +813,17 @@ public class MainActivity extends AppCompatActivity {
             List<WimMetadata.Image> editions=WimMetadata.read(proxy.path());
             WimMetadata.Image edition=editions.stream().filter(e->e.index==windowsEditionIndex).findFirst()
                     .orElseThrow(()->new IOException("Wybrana edycja nie istnieje w obrazie Windows."));
+            int support=WimMetadata.bootCapabilities(proxy.path(),windowsEditionIndex,(options.flags&WindowsUnattend.USE_MS2023_BOOTLOADERS)!=0);
+            int boot=WindowsToGoInstaller.selectBoot(support,gpt,windowsFirmware);boolean bios=(boot&1)!=0,efi=(boot&2)!=0;
+            if(bios && options.architecture>2)throw new IOException("Obraz ARM wymaga rozruchu UEFI.");
+            WindowsToGoLayout layout=WindowsToGoLayout.create(disk.capacity,disk.blockSize,ntfsClusterSize,gpt,
+                    bootResource("mbr_win7.bin"),!gpt && efi?bootResource("uefi-ntfs.img"):null,!bios && efi);
             WindowsToGoInstaller.requireCapacity(edition,layout.main.length,ntfsClusterSize);
             // Read/validate the source before the optional destructive surface test.
             WindowsUnattend.validate(options);testDisk(disk);
             final String[] last={""};
             WindowsToGoInstaller.install(device,layout,proxy.path(),windowsEditionIndex,volumeLabel,ntfsClusterSize,quickFormat,
-                    !gpt && options.architecture<=2,true,getCacheDir(),options,bootResource("br_ntfs_0x0.bin"),bootResource("br_ntfs_0x54.bin"),
+                    bios,efi,getCacheDir(),options,bootResource("br_ntfs_0x0.bin"),bootResource("br_ntfs_0x54.bin"),
                     (phase,path,done,total)->{
                         if(cancel || Thread.currentThread().isInterrupted())throw new InterruptedIOException("Przerwano Windows To Go.");
                         int percent=total<=0?0:(int)(100.0*done/total);String step=phase+":"+percent;

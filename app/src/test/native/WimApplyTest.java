@@ -33,6 +33,8 @@ public final class WimApplyTest {
         }
     }
     public static void main(String[] args) throws Exception {
+        check(Arrays.equals(new boolean[]{false,true,false,true},WimMetadata.containsFiles(args[0],1,"rich","RICH/DATA.BIN","unicode-link","żółć/日本語.txt")),
+                "WIM probe directory, case, reparse and Unicode");
         Path target=Path.of(args[1]),source=Path.of(args[2]);
         try(Disk disk=new Disk(target,128L<<20)) {
             NtfsVolume.format(disk,"WIM_APPLY",4096,2048,true);disk.writes=0;

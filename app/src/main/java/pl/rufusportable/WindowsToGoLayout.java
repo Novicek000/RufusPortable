@@ -28,14 +28,15 @@ final class WindowsToGoLayout {
     final List<Partition> partitions;
     final DiskLayout metadata;
 
-    private WindowsToGoLayout(long capacity,int sector,int cluster,boolean gpt,byte[] mbr,byte[] uefi) throws IOException {
+    private WindowsToGoLayout(long capacity,int sector,int cluster,boolean gpt,byte[] mbr,byte[] uefi,boolean uefiOnly) throws IOException {
         if(capacity<=0 || capacity%sector!=0 || sector<512 || sector>4096 || Integer.bitCount(sector)!=1 ||
                 cluster<sector || cluster>2097152 || Integer.bitCount(cluster)!=1 ||
                 (!gpt && (sector!=512 || capacity/sector>0x100000000L)) ||
                 mbr==null || mbr.length>440 || (!gpt && uefi!=null && uefi.length!=1048576))
             throw new IOException("Nieobsługiwana geometria Windows To Go.");
         this.gpt=gpt;this.capacity=capacity;sectorSize=sector;diskId=UUID.randomUUID();
-        int signature;do {signature=new SecureRandom().nextInt();}while(signature==0);diskSignature=signature;
+        int signature;do {signature=new SecureRandom().nextInt();}while(signature==0);
+        diskSignature=uefiOnly && !gpt?0x49464555:signature;
         long track=63L*sector,start=1048576,last=capacity-(gpt?33L*sector:0);
         List<Partition> parts=new ArrayList<>();
         if(gpt) {
@@ -73,7 +74,7 @@ final class WindowsToGoLayout {
             System.arraycopy(header(sectors,sectors-1,1,backupTable,entries),0,backup,32*sector,sector);
             metadata.add(capacity-backup.length,backup);
         } else {
-            System.arraycopy(mbr,0,first,0,mbr.length);
+            if(!uefiOnly)System.arraycopy(mbr,0,first,0,mbr.length);
             mbrEntry(b,446,128,7,main.offset/sector,main.length/sector);
             if(auxiliary!=null) {
                 mbrEntry(b,462,0,0xef,auxiliary.offset/sector,auxiliary.length/sector);
@@ -85,9 +86,13 @@ final class WindowsToGoLayout {
         metadata.add(0,first);metadata.validate(capacity,sector);
     }
     static WindowsToGoLayout create(long capacity,int sector,int cluster,boolean gpt,byte[] mbr,byte[] uefi) throws IOException {
+        return create(capacity,sector,cluster,gpt,mbr,uefi,false);
+    }
+    static WindowsToGoLayout create(long capacity,int sector,int cluster,boolean gpt,byte[] mbr,byte[] uefi,boolean uefiOnly) throws IOException {
         // Validate before division or allocations in the constructor.
         if(sector<512 || sector>4096 || Integer.bitCount(sector)!=1)throw new IOException("Nieprawidłowy sektor nośnika.");
-        return new WindowsToGoLayout(capacity,sector,cluster,gpt,mbr,uefi);
+        if(uefiOnly && !gpt && uefi==null)throw new IOException("Rozruch UEFI z MBR wymaga partycji UEFI:NTFS.");
+        return new WindowsToGoLayout(capacity,sector,cluster,gpt,mbr,uefi,uefiOnly);
     }
     private static long floor(long value,long unit){return Math.floorDiv(value,unit)*unit;}
     private static long ceil(long value,long unit){return floor(value+unit-1,unit);}

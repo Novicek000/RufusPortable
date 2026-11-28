@@ -224,3 +224,13 @@ Offline SYSTEM może także otrzymać SkuPolicyRequired=1 w wybranym ControlSet,
 [CI 46131605265](https://github.com/Novicek000/RufusPortable/actions/runs/46131605265) zakończył się sukcesem na API 26 i 35 z 13 testami dla rewizji 1e50981. Pierwszy obraz Windows To Go z tej rewizji uruchomił się w QEMU i pokazał „Getting ready”; starszą sondę zastąpiono nowym przebiegiem 46132703672. Nie ma jeszcze potwierdzonego wyniku pierwszego logowania Windows To Go.
 
 75 testów Java, lint i budowanie APK przeszły. Czysty przebieg API 26/x86 zakończył się `OK (14 tests)`, w tym otwarcie rzeczywistego testowego ISO, odczyt install.wim przez JNI/AppFuse, wybór Windows To Go i edycji ARM64 oraz zachowanie dysków offline bez trybu wymazania dysku 0. W pierwszej próbie świeży emulator pokazał ANR procesu System UI; po ustabilizowaniu systemu oba testy interfejsu przeszły osobno, a następnie cały zestaw 14 testów przeszedł. Testowy ISO zawiera własne dane, nie Windows.
+
+## Wykrywanie firmware i nazwy CA 2023
+
+Przed zapisem Windows To Go sprawdzane są rzeczywiste pliki PCAT/EFI w wybranej edycji WIM. Zapytanie JNI czyta tylko metadane, obsługuje UTF-8, odróżnia zwykły plik od katalogu/reparse i zgłasza uszkodzony obraz lub nieistniejący indeks. wimlib używa teraz domyślnej czułości nazw zgodnej z Windows: wyszukiwanie i wypakowanie nie zależą od wielkości liter. Testy hosta oraz AppFuse obejmują wyszukanie README.TXT, brak ścieżki, katalog, reparse i Unicode; wypakowanie sprawdza AUTOUNATTEND.XML dla wpisu Autounattend.xml.
+
+Opcje pozwalają wybrać rozruch automatyczny, tylko UEFI albo tylko BIOS. BIOS wymaga MBR; GPT wymaga dostępnego EFI. W trybie automatycznym obraz zawierający wyłącznie pliki BIOS nie otrzymuje niedziałającej konfiguracji UEFI. MBR przeznaczony tylko dla UEFI ma wyzerowany kod rozruchowy oraz marker 0x49464555, tak jak WriteMBR/CreatePartition Rufusa; BCD używa tej samej sygnatury.
+
+W Windows To Go CA 2023 pliki bootmgfw_EX.efi, memtest_EX.efi i czcionki z Fonts_EX otrzymują nazwy docelowe bez _EX. Poprzedni test syntetyczny używał nazw bez przyrostka w katalogach _EX; poprawiono go tak, aby odwzorowywał nazwy Microsoft. Niezależny fsck.fat i PyFatFS potwierdziły zawartość obu ESP 512/4096 B po tej zmianie. To sprawdza przygotowanie plików; rozruch z CA 2023 przy Secure Boot nadal wymaga testu.
+
+77 testów Java, lint, cztery ABI i testy natywne WIM przeszły, w tym wszystkie wcześniejsze próby metadanych NTFS oraz 32 768 porównań odpowiedzi XML z Rufusem. 14 testów API 26/x86 przeszło z wykrywaniem plików przez AppFuse i zachowaniem wyboru „Tylko UEFI” w interfejsie. [CI 46133171849](https://github.com/Novicek000/RufusPortable/actions/runs/46133171849) wcześniej potwierdził rewizję 8ccc097 z 14 testami także na API 35.

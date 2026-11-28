@@ -8,6 +8,10 @@ public final class WimMetadataTest {
         var images=WimMetadata.read(args[0]);
         if(images.size()!=2)throw new AssertionError("image count");
         var first=images.get(0);
+        if(!java.util.Arrays.equals(new boolean[]{true,true,false,false},WimMetadata.containsFiles(args[0],1,
+                "README.TXT","readme.txt","missing.txt","readme.txt/child")))throw new AssertionError("WIM file lookup / Windows case folding");
+        try {WimMetadata.containsFiles(args[0],3,"readme.txt");throw new AssertionError("Invalid probe image accepted");}catch(IOException expected){}
+        try {WimMetadata.containsFiles(args[0],1,"../readme.txt");throw new AssertionError("Escaping probe path accepted");}catch(IOException expected){}
         if(first.index!=1 || !first.name.equals("Windows Test żółć") ||
                 !first.architecture.equals("9") || !first.edition.equals("Professional") ||
                 !first.editionName().equals("Windows Test Pro") || !first.property("WINDOWS/VERSION/MAJOR").equals("10") ||
@@ -52,7 +56,7 @@ public final class WimMetadataTest {
             if(updatedLength!=Files.size(Path.of(args[0])))throw new AssertionError("compacted WIM length mismatch");
             Path extracted=Files.createTempDirectory(source.getParent(),"extract-wim-");
             try {
-                WimMetadata.extractFile(args[0],2,"Autounattend.xml",extracted.toString());
+                WimMetadata.extractFile(args[0],2,"AUTOUNATTEND.XML",extracted.toString());
                 if(!text.equals(Files.readString(extracted.resolve("Autounattend.xml"))))
                     throw new AssertionError("WIM update/extract mismatch");
                 Files.delete(extracted.resolve("Autounattend.xml"));
