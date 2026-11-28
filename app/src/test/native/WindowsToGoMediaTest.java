@@ -47,6 +47,12 @@ public final class WindowsToGoMediaTest {
                     int percent=total==0?0:(int)(done*100/total);if(percent!=last[0]){last[0]=percent;System.out.println("Apply Windows "+percent+"% files="+files+"/"+totalFiles);}
                 });
                 try(NtfsVolume volume=new NtfsVolume(main)) {
+                    String directory="";
+                    for(String part:new String[]{"Windows","Setup","Scripts"}) {
+                        String parent=directory;directory=directory.isEmpty()?part:directory+"/"+part;
+                        if(volume.list(parent).stream().noneMatch(e->e.name.equalsIgnoreCase(part)))volume.mkdir(directory);
+                    }
+                    try(OutputStream output=volume.create("Windows/Setup/Scripts/rufus-ci-probe.ps1")){output.write(WindowsInstallProbe.script().getBytes(StandardCharsets.UTF_8));}
                     new WindowsToGoBootFiles(volume).install(layout,esp,cache.toFile(),false,true,false,"x64","en-US",image.displayName(),true,answer,
                             (phase,path,done,total)->{});
                 }

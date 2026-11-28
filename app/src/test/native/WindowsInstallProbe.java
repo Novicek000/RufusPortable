@@ -8,19 +8,28 @@ import java.util.*;
 /** CI-only first-logon probe; the application generator remains byte-identical to Rufus. */
 final class WindowsInstallProbe implements AutoCloseable {
     final Path boot;
+    final Path script;
     final WindowsCustomization customization;
-    private WindowsInstallProbe(Path boot,WindowsCustomization customization) {this.boot=boot;this.customization=customization;}
-    static String firstLogonProbe(String xml) {
-        String script="Start-Sleep -Seconds 60; $os=Get-CimInstance Win32_OperatingSystem; "+
+    private static final String SCRIPT_MEDIA="sources/$OEM$/$$/Setup/Scripts/rufus-ci-probe.ps1";
+    private WindowsInstallProbe(Path boot,Path script,WindowsCustomization customization) {this.boot=boot;this.script=script;this.customization=customization;}
+    static String script() {
+        return "$ErrorActionPreference='Stop'\r\n"+
+                "Start-Transcript -Path C:\\rufus-port-probe.log -Force\r\n"+
+                "try {\r\nStart-Sleep -Seconds 60\r\n$os=Get-CimInstance Win32_OperatingSystem\r\n"+
                 "@{User=$env:USERNAME;Caption=$os.Caption;Build=$os.BuildNumber;Version=$os.Version;"+
                 "Culture=(Get-Culture).Name;Timezone=(Get-TimeZone).Id;"+
                 "Portable=(Get-ItemProperty 'HKLM:\\SYSTEM\\CurrentControlSet\\Control' -ErrorAction SilentlyContinue).PortableOperatingSystem;"+
                 "ImageState=(Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Setup\\State').ImageState}"+
-                "|ConvertTo-Json|Set-Content -LiteralPath C:\\rufus-port-test.json -Encoding UTF8; shutdown.exe /s /t 0";
-        String command="powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \""+script+"\"";
-        command=command.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;");
+                "|ConvertTo-Json|Set-Content -LiteralPath C:\\rufus-port-test.json -Encoding UTF8\r\n"+
+                "} catch { $_ | Out-String | Set-Content C:\\rufus-port-error.txt -Encoding UTF8 }\r\n"+
+                "Stop-Transcript\r\nshutdown.exe /s /t 0\r\n";
+    }
+    static String firstLogonProbe(String xml) {
+        String command="powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File C:\\Windows\\Setup\\Scripts\\rufus-ci-probe.ps1";
         if(!xml.contains("</FirstLogonCommands>"))throw new AssertionError("Missing first-logon command section");
-        xml=xml.replace("</FirstLogonCommands>","<SynchronousCommand wcm:action=\"add\"><Order>99</Order><Description>CI installation probe</Description><CommandLine>"+
+        int order=0;var orders=java.util.regex.Pattern.compile("<Order>([0-9]+)</Order>").matcher(xml.substring(xml.indexOf("<FirstLogonCommands>"),xml.indexOf("</FirstLogonCommands>")));
+        while(orders.find())order=Math.max(order,Integer.parseInt(orders.group(1)));order++;
+        xml=xml.replace("</FirstLogonCommands>","<SynchronousCommand wcm:action=\"add\"><Order>"+order+"</Order><Description>CI installation probe</Description><CommandLine>"+
                 command+"</CommandLine></SynchronousCommand></FirstLogonCommands>");
         return xml;
     }
@@ -47,14 +56,22 @@ final class WindowsInstallProbe implements AutoCloseable {
             WimMetadata.verify(boot.toString());
             List<IsoTree.Entry> modified=new ArrayList<>(entries);
             modified.set(modified.indexOf(entry),new IsoTree.Entry(entry.path,false,length,Collections.emptyList()));
+            Path script=directory.resolve("rufus-ci-probe.ps1");Files.writeString(script,script(),StandardCharsets.UTF_8);
+            String parent="";String[] parts=SCRIPT_MEDIA.split("/");
+            for(int i=0;i<parts.length-1;i++) {
+                parent=parent.isEmpty()?parts[i]:parent+"/"+parts[i];String path=parent;
+                if(modified.stream().noneMatch(e->e.path.equalsIgnoreCase(path)))modified.add(new IsoTree.Entry(path,true,0,0));
+            }
+            modified.add(new IsoTree.Entry(SCRIPT_MEDIA,false,Files.size(script),Collections.emptyList()));
             WindowsCustomization plan=new WindowsCustomization(modified,options.flags,Integer.parseInt(setup.build),
                     xml.getBytes(StandardCharsets.UTF_8),e->new ExtentInputStream(source,e),name->Files.readAllBytes(assets.resolve(name)));
             System.out.println("Prepared silent Windows install probe, boot.wim index="+index+" build="+setup.build);
-            return new WindowsInstallProbe(boot,plan);
+            return new WindowsInstallProbe(boot,script,plan);
         } catch(Exception error) {remove(directory);throw error;}
     }
     InputStream open(IsoTree.Reader source,IsoTree.Entry entry) throws IOException {
-        return customization.open(e->e.path.equalsIgnoreCase("sources/boot.wim")?Files.newInputStream(boot):new ExtentInputStream(source,e),entry);
+        return customization.open(e->e.path.equalsIgnoreCase("sources/boot.wim")?Files.newInputStream(boot):
+                e.path.equalsIgnoreCase(SCRIPT_MEDIA)?Files.newInputStream(script):new ExtentInputStream(source,e),entry);
     }
     private static void remove(Path directory) throws IOException {
         try(var paths=Files.walk(directory)){for(Path path:(Iterable<Path>)paths.sorted(Comparator.reverseOrder())::iterator)Files.delete(path);}

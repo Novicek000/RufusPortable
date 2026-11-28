@@ -204,3 +204,11 @@ Próba pełnej instalacji Windows [CI 46073326965](https://github.com/Novicek000
 Testy hosta potwierdziły pliki BIOS+UEFI, ESP 512/4096 B, CA 2023, SanPolicy wybranego ControlSet, zachowanie innego ControlSet i istniejącej odpowiedzi, przerwanie oraz usuwanie katalogu roboczego. fsck.fat zgłasza poprawne oba ESP, niezależny PyFatFS potwierdza dokładną zawartość bootloadera, fallback, czcionek i zasobów oraz obecność BCD. Skrypt `test-wintogo-boot.sh` wymaga wcześniejszych testów natywnych NTFS i hivex oraz zależności z requirements-fat-test.txt.
 
 `WindowsToGoInstaller` łączy formatowanie, aplikowanie WIM i konfigurację. Integracja wyboru trybu w interfejsie i pełny rozruch pozostają do potwierdzenia. Workflow `windows-to-go-test.yml` przygotowuje pełny Windows z oficjalnego ISO i uruchamia USB w QEMU/KVM aż do sondy pierwszego logowania. Hostowy WIM tego testu zastępuje deskryptor AppFuse Androida; nie jest mechanizmem kopiowania WIM w aplikacji. Dopóki próba nie przejdzie, Windows To Go nie jest oznaczony jako ukończony.
+
+## Wynik próby instalacji Windows i sonda CI
+
+[Przebieg 46079143579](https://github.com/Novicek000/RufusPortable/actions/runs/46079143579) przygotował i zweryfikował cały nośnik, a Windows Setup zakończył kopiowanie, utworzył docelowy menedżer rozruchu i uruchomił pulpit konta RufusTest (screen-30). Późniejsze zrzuty pokazują żądanie zmiany hasła, zgodne z poleceniem oryginalnego generatora. Przebieg zakończył limit 120 minut, ponieważ nie otrzymano wyniku sondy i wyłączenia VM. Potwierdza to dojście do pulpitu, ale nie spełnia jeszcze automatycznych asercji systemu, języka, strefy i stanu instalacji.
+
+Sonda CI używa teraz krótkiego polecenia `powershell -File` i osobnego, wyłącznie testowego skryptu dostarczanego przez OEM. Numer polecenia następuje po istniejących poleceniach Rufusa. Skrypt zapisuje transkrypcję i błąd. Odczyt logów Panther, UnattendGC, użytej odpowiedzi i sondy wykonywany jest także po błędzie lub przekroczeniu czasu, po zatrzymaniu QEMU. Nie zmienia to generatora odpowiedzi aplikacji ani jego 32 768 porównań z oryginałem.
+
+72 testy Java, lint, budowanie czterech ABI oraz 13 testów instrumentacyjnych API 26/x86 przeszły dla warstwy Windows To Go i enumeracji NTFS. Pełny Windows To Go oraz integracja jego wyboru w interfejsie nadal pozostają w toku.

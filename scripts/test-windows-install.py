@@ -41,6 +41,7 @@ def main():
                "-display", "none", "-vga", "std", "-net", "none", "-serial", "file:" + str(args.output.resolve() / "serial.log"),
                "-monitor", "none", "-qmp", f"unix:{qmp_path},server=on,wait=off"]
     started = time.monotonic()
+    error = None
     with log_path.open("wb") as log:
         process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT)
         stream = None
@@ -123,6 +124,8 @@ def main():
             if process.returncode != 0:
                 raise RuntimeError(f"QEMU exited with {process.returncode}")
             print(f"VM shut down after {time.monotonic() - started:.0f}s; checking installed target", flush=True)
+        except BaseException as failure:
+            error = failure
         finally:
             if stream:
                 stream.close()
@@ -135,6 +138,17 @@ def main():
                     process.kill()
                     process.wait()
 
+    try:
+        inspect_target(args, strict=error is None)
+    except Exception as diagnostic_error:
+        if error is None:
+            raise
+        print(f"Could not complete offline diagnostics: {diagnostic_error}", flush=True)
+    if error is not None:
+        raise error
+
+
+def inspect_target(args, strict=True):
     # Read the third GPT partition, the destination chosen by the unmodified Rufus
     # disk configuration. The VM is stopped; ntfscat never reads a live guest filesystem.
     installed = args.media if args.wintogo else args.target
@@ -156,11 +170,26 @@ def main():
     device = subprocess.check_output(["sudo", "losetup", "--find", "--show", "--read-only", "--offset", str(start * 512),
                                       "--sizelimit", str((end - start + 1) * 512), str(installed.resolve())], text=True).strip()
     try:
-        result = subprocess.check_output(["sudo", "ntfscat", device, "/rufus-port-test.json"])
+        logs = {
+            "/rufus-port-probe.log": "probe.log", "/rufus-port-error.txt": "probe-error.txt",
+            "/Windows/Panther/setupact.log": "setupact.log", "/Windows/Panther/setuperr.log": "setuperr.log",
+            "/Windows/Panther/UnattendGC/setupact.log": "unattend-setupact.log",
+            "/Windows/Panther/UnattendGC/setuperr.log": "unattend-setuperr.log",
+            "/Windows/Panther/unattend.xml": "installed-unattend.xml",
+            "/Windows/Setup/Scripts/rufus-ci-probe.ps1": "installed-probe.ps1",
+        }
+        for path, name in logs.items():
+            captured = subprocess.run(["sudo", "ntfscat", device, path], capture_output=True)
+            if captured.returncode == 0:
+                (args.output / name).write_bytes(captured.stdout)
+        captured = subprocess.run(["sudo", "ntfscat", device, "/rufus-port-test.json"], capture_output=True)
+        if captured.returncode:
+            if strict:
+                raise AssertionError("The first-logon probe did not write its result; see offline Panther and probe logs")
+            print("No first-logon result; collected offline diagnostics after VM failure", flush=True)
+            return
+        result = captured.stdout
         (args.output / "installed-windows.json").write_bytes(result)
-        for name in ("setupact.log", "setuperr.log"):
-            with (args.output / name).open("wb") as output:
-                subprocess.run(["sudo", "ntfscat", device, "/Windows/Panther/" + name], stdout=output, check=False)
         information = json.loads(result.decode("utf-8-sig"))
         assert information["User"].lower() == "rufustest", information
         assert information["Caption"].startswith("Microsoft Windows 11"), information
