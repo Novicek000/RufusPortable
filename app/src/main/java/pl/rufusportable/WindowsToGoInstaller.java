@@ -36,6 +36,7 @@ final class WindowsToGoInstaller {
         switch(image.platform()){case "x86":architecture=1;break;case "x64":architecture=2;break;case "ARM":architecture=3;break;case "ARM64":architecture=4;break;default:throw new IOException("Nieobsługiwana architektura Windows To Go.");}
         if(options.architecture!=architecture)throw new IOException("Ustawienia odpowiedzi nie pasują do architektury Windows.");
         if(bios && architecture>2)throw new IOException("Obraz ARM wymaga rozruchu UEFI.");
+        requireCapacity(image,layout.main.length,cluster);
         byte[] answer=WindowsUnattend.create(options);BlockDevice main=partition(disk,layout.main);
         BlockDevice esp=layout.gpt?partition(disk,layout.esp):null;
         progress.update("format","NTFS",0,1);
@@ -56,10 +57,20 @@ final class WindowsToGoInstaller {
         WimMetadata.apply(wim,index,main,(done,total,files,totalFiles)->progress.update("apply","Windows · "+files+" / "+totalFiles,done,total));
         try(NtfsVolume volume=new NtfsVolume(main)) {
             new WindowsToGoBootFiles(volume).install(layout,esp,cache,bios,efi,(options.flags&WindowsUnattend.USE_MS2023_BOOTLOADERS)!=0,
-                    image.platform(),options.uiLanguage,image.displayName(),(options.flags&WindowsUnattend.OFFLINE_INTERNAL_DRIVES)!=0,answer,
+                    image.platform(),"en-US",image.displayName(),(options.flags&WindowsUnattend.OFFLINE_INTERNAL_DRIVES)!=0,
+                    (options.flags&WindowsUnattend.FORCE_S_MODE)!=0,answer,
                     (phase,path,done,total)->progress.update(phase,path,done,total));
         }
         disk.sync();progress.update("complete","Windows To Go",1,1);
+    }
+    static void requireCapacity(WimMetadata.Image image,long capacity,int cluster) throws IOException {
+        if(capacity<=0 || cluster<512 || cluster>2097152 || Integer.bitCount(cluster)!=1)throw new IOException("Nieprawidłowa geometria Windows To Go.");
+        try {
+            long bytes=Long.parseLong(image.property("TOTALBYTES")),files=Long.parseLong(image.property("FILECOUNT")),directories=Long.parseLong(image.property("DIRCOUNT"));
+            if(bytes<0 || files<0 || directories<0)throw new NumberFormatException();
+            long required=Math.addExact(Math.addExact(bytes,Math.multiplyExact(Math.addExact(files,directories),cluster)),128L<<20);
+            if(required>capacity)throw new IOException("Rozpakowany Windows i struktury NTFS nie mieszczą się na nośniku.");
+        }catch(NumberFormatException|ArithmeticException error){throw new IOException("Nieprawidłowa informacja o rozmiarze obrazu Windows.",error);}
     }
     private WindowsToGoInstaller(){}
 }

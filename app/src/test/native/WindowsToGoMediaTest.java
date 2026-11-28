@@ -53,7 +53,7 @@ public final class WindowsToGoMediaTest {
                         if(volume.list(parent).stream().noneMatch(e->e.name.equalsIgnoreCase(part)))volume.mkdir(directory);
                     }
                     try(OutputStream output=volume.create("Windows/Setup/Scripts/rufus-ci-probe.ps1")){output.write(WindowsInstallProbe.script().getBytes(StandardCharsets.UTF_8));}
-                    new WindowsToGoBootFiles(volume).install(layout,esp,cache.toFile(),false,true,false,"x64","en-US",image.displayName(),true,answer,
+                    new WindowsToGoBootFiles(volume).install(layout,esp,cache.toFile(),false,true,false,"x64","en-US",image.displayName(),true,false,answer,
                             (phase,path,done,total)->{});
                 }
                 disk.sync();System.out.println("Prepared applied Windows To Go image with native BCD, ESP and offline SAN policy");

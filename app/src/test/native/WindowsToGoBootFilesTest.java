@@ -48,17 +48,18 @@ public final class WindowsToGoBootFilesTest {
                     put(volume,"Windows/System32/config/SYSTEM",Files.readAllBytes(system.toPath()));
                     if(sector==4096)put(volume,"Windows/Panther/unattend.xml",expectedAnswer);
                     if(gpt && sector==512) {
-                        try {new WindowsToGoBootFiles(volume).install(layout,efi,directory.toFile(),false,true,true,"x64","en-US","Windows test",true,answer,
+                        try {new WindowsToGoBootFiles(volume).install(layout,efi,directory.toFile(),false,true,true,"x64","en-US","Windows test",true,false,answer,
                                 (phase,path,done,total)->{throw new InterruptedIOException("cancel boot files");});throw new AssertionError("Cancellation ignored");}
                         catch(InterruptedIOException expected){check(expected.getMessage().equals("cancel boot files"),"Cancellation exception changed");}
                     }
-                    new WindowsToGoBootFiles(volume).install(layout,gpt?efi:null,directory.toFile(),!gpt,true,true,"x64","en-US","Windows 11 test",true,answer,
+                    new WindowsToGoBootFiles(volume).install(layout,gpt?efi:null,directory.toFile(),!gpt,true,true,"x64","en-US","Windows 11 test",true,sector==4096,answer,
                             (phase,path,done,total)->check(done>=0 && done<=total,"Progress bounds"));
                     try(InputStream input=volume.open("Windows/Panther/unattend.xml")){check(Arrays.equals(expectedAnswer,input.readAllBytes()),"Unattend write or image supplied answer preservation");}
                     Path savedSystem=directory.resolve(name+"-SYSTEM.hive");try(InputStream input=volume.open("Windows/System32/config/SYSTEM")){Files.copy(input,savedSystem,StandardCopyOption.REPLACE_EXISTING);}
                     try(RegistryHive hive=new RegistryHive(savedSystem.toFile(),false)) {
                         check(hive.get("ControlSet002\\Services\\partmgr\\Parameters","SanPolicy").dword()==4,"Offline default control set");
                         check(hive.get("ControlSet001\\Services\\partmgr\\Parameters","SanPolicy").dword()==2,"Other control set changed");
+                        if(sector==4096)check(hive.get("ControlSet002\\Control\\CI\\Policy","SkuPolicyRequired").dword()==1,"S mode policy");
                     }
                     if(!gpt) {
                         try(InputStream input=volume.open("bootmgr")){check(Arrays.equals(payloads.get("Windows/Boot/PCAT/bootmgr"),input.readAllBytes()),"BIOS bootmgr");}

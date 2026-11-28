@@ -75,7 +75,7 @@ final class WindowsToGoBootFiles {
             while((count=stream.read(buffer))!=-1){if(Thread.currentThread().isInterrupted())throw new InterruptedIOException();digest.update(buffer,0,count);}return digest.digest();
         }catch(NoSuchAlgorithmException e){throw new AssertionError(e);}
     }
-    private void offline(File scratch) throws IOException {
+    private void offline(File scratch,boolean offlineInternal,boolean forceSMode) throws IOException {
         File source=new File(scratch,"SYSTEM-source"),result=new File(scratch,"SYSTEM-offline");
         extractHive("Windows/System32/config/SYSTEM",source);
         try(RegistryHive hive=new RegistryHive(source,true)) {
@@ -83,14 +83,16 @@ final class WindowsToGoBootFiles {
             if(selected==null || selected.dword()<1 || selected.dword()>999)throw new IOException("Nieprawidłowy domyślny zestaw sterowania Windows.");
             String control=String.format(Locale.ROOT,"ControlSet%03d",selected.dword());
             if(!hive.children("").contains(control))throw new IOException("Brak domyślnego zestawu sterowania Windows.");
-            hive.putDword(control+"\\Services\\partmgr\\Parameters","SanPolicy",4);hive.commit(result);
+            if(offlineInternal)hive.putDword(control+"\\Services\\partmgr\\Parameters","SanPolicy",4);
+            if(forceSMode)hive.putDword(control+"\\Control\\CI\\Policy","SkuPolicyRequired",1);
+            hive.commit(result);
         }
         replaceHive("Windows/System32/config/SYSTEM",result);
         if(!Arrays.equals(digest(new FileInputStream(result)),digest(windows.open("Windows/System32/config/SYSTEM"))))
             throw new IOException("Błąd weryfikacji konfiguracji dysków offline Windows To Go.");
     }
     void install(WindowsToGoLayout layout,BlockDevice esp,File cache,boolean bios,boolean efi,boolean bootex,
-            String architecture,String locale,String title,boolean offlineInternal,byte[] unattend,Progress progress) throws IOException {
+            String architecture,String locale,String title,boolean offlineInternal,boolean forceSMode,byte[] unattend,Progress progress) throws IOException {
         if((!bios && !efi) || (layout.gpt && (bios || !efi || esp==null)) || (!layout.gpt && esp!=null))
             throw new IOException("Nieobsługiwana konfiguracja plików Windows To Go.");
         String fallback;
@@ -134,7 +136,7 @@ final class WindowsToGoBootFiles {
                 for(Map.Entry<String,byte[]> hash:hashes.entrySet())if(!Arrays.equals(hash.getValue(),digest(windows.open(hash.getKey()))))
                     throw new IOException("Błąd weryfikacji pliku rozruchowego Windows: "+hash.getKey());
             }
-            if(offlineInternal)offline(scratch.toFile());
+            if(offlineInternal || forceSMode)offline(scratch.toFile(),offlineInternal,forceSMode);
             if(unattend!=null) {
                 ensureDirectory("Windows/Panther");
                 NtfsVolume.Entry existing=child("Windows/Panther","unattend.xml");

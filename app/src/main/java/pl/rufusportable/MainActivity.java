@@ -46,7 +46,7 @@ public class MainActivity extends AppCompatActivity {
     private boolean quickFormat=true;
     private String volumeLabel="RUFUS";
     private WindowsProfile windowsProfile;
-    private boolean windowsReviewed,windowsConfigured;
+    private boolean windowsReviewed,windowsConfigured,windowsToGo;
     private int windowsFlags,windowsEditionIndex=1;
     private String windowsUser="",windowsLocale=Locale.getDefault().toLanguageTag(),windowsTimezone;
     private static final class WindowsProfile {
@@ -109,6 +109,7 @@ public class MainActivity extends AppCompatActivity {
             windowsLocale=state.getString("windowsLocale",Locale.getDefault().toLanguageTag());
             windowsTimezone=state.getString("windowsTimezone");windowsConfigured=state.getBoolean("windowsConfigured");
             windowsReviewed=state.getBoolean("windowsReviewed");
+            windowsToGo=state.getBoolean("windowsToGo");
             gpt=state.getBoolean("gpt"); verifyWrite=state.getBoolean("verify",true);
             ntfsClusterSize=state.getInt("ntfsCluster",4096); quickFormat=state.getBoolean("quick",true); volumeLabel=state.getString("label","RUFUS");
             String saved=state.getString("source");
@@ -125,6 +126,7 @@ public class MainActivity extends AppCompatActivity {
         state.putInt("windowsEdition",windowsEditionIndex);state.putInt("windowsFlags",windowsFlags);state.putString("windowsUser",windowsUser);
         state.putString("windowsLocale",windowsLocale);state.putString("windowsTimezone",windowsTimezone);
         state.putBoolean("windowsConfigured",windowsConfigured);state.putBoolean("windowsReviewed",windowsReviewed);
+        state.putBoolean("windowsToGo",windowsToGo);
         state.putBoolean("builtin",image!=null && image.uri==null); state.putBoolean("dos",dos); state.putBoolean("testMedia",testMedia);
         state.putBoolean("iso",useIso); state.putBoolean("gpt",gpt); state.putBoolean("verify",verifyWrite);
         state.putInt("badBlockOption",badBlockOption);state.putBoolean("detectFakes",detectFakeMedia);
@@ -274,14 +276,14 @@ public class MainActivity extends AppCompatActivity {
         });
     }
     private void builtin(boolean boot) {
-        windowsProfile=null;windowsReviewed=false;
+        windowsProfile=null;windowsReviewed=false;windowsToGo=false;windowsConfigured=false;windowsFlags=0;
         pickedUri=null; dos=boot; useIso=false; image=ImageFile.volume(boot);
         showImage(); status.setText(target==null?"Wybierz nośnik USB.":"Sprawdź opcje i rozpocznij zapis."); refresh();
     }
     private void showImage() {
         imageName.setText(image.name);
         if (image.uri==null) { imageMeta.setText("MBR · FAT32 · "+(dos?"BIOS":"formatowanie")); return; }
-        imageMeta.setText((image.length<0?"Rozmiar nieznany":size(image.length))+" · "+(useIso?"ISO · tryb plikowy · "+(gpt?"GPT":"MBR")+" · NTFS":image.partition+" · DD"));
+        imageMeta.setText((image.length<0?"Rozmiar nieznany":size(image.length))+" · "+(useIso?(windowsToGo?"Windows To Go":"ISO · tryb plikowy")+" · "+(gpt?"GPT":"MBR")+" · NTFS":image.partition+" · DD"));
     }
     private Spinner choices(LinearLayout box,String title,String[] items,int selected) {
         TextView text=label(box,title,16,true);
@@ -297,6 +299,7 @@ public class MainActivity extends AppCompatActivity {
         Spinner mode=choices(box,"Metoda zapisu",switchable?new String[]{"Sektorowa (DD)","ISO · tryb plikowy"}:
                 new String[]{image.uri==null?image.name:useIso?"ISO · tryb plikowy":"Sektorowa (DD)"},switchable && useIso?1:0);
         LinearLayout isoBox=column(); box.addView(isoBox);
+        Spinner windowsMode=choices(isoBox,"Tryb Windows",new String[]{"Standardowa instalacja Windows","Windows To Go — system uruchamiany z USB"},windowsToGo?1:0);
         Spinner scheme=choices(isoBox,"Schemat partycji",new String[]{"MBR","GPT"},gpt?1:0);
         int[] clusterSizes={512,1024,2048,4096,8192,16384,32768,65536,131072,262144,524288,1048576,2097152};
         int clusterIndex=3;
@@ -332,6 +335,8 @@ public class MainActivity extends AppCompatActivity {
             if (iso && !WindowsInstaller.validLabel(label)) { volume.setError("Etykieta NTFS może mieć do 32 znaków."); return; }
             if (image.uri==null && !label.matches("[a-zA-Z0-9 _-]{1,11}")) {volume.setError("Wpisz do 11 liter ASCII, cyfr, spacji, - lub _."); return;}
             useIso=iso; if (iso || image.uri==null) volumeLabel=label; testMedia=surface.isChecked();
+            boolean toGo=windowsMode.getSelectedItemPosition()==1;
+            if(windowsToGo!=toGo){windowsToGo=toGo;windowsProfile=null;windowsReviewed=false;windowsConfigured=false;}
             badBlockOption=patterns.getSelectedItemPosition();detectFakeMedia=fakes.isChecked();
             gpt=scheme.getSelectedItemPosition()==1; ntfsClusterSize=clusterSizes[clusters.getSelectedItemPosition()]; quickFormat=quick.isChecked();
             verifyWrite=verify.isChecked(); showImage(); dialog.dismiss();
@@ -396,27 +401,30 @@ public class MainActivity extends AppCompatActivity {
             try {
                 List<IsoTree.Entry> entries=selected.contents(this);
                 WindowsProfile profile;
-                if(entries.stream().anyMatch(e->!e.directory && e.path.equalsIgnoreCase("sources/$OEM$/$$/Panther/unattend.xml"))) {
+                if(!windowsToGo && entries.stream().anyMatch(e->!e.directory && e.path.equalsIgnoreCase("sources/$OEM$/$$/Panther/unattend.xml"))) {
                     profile=new WindowsProfile(entries);
                 } else {
-                    IsoTree.Entry boot=entries.stream().filter(e->!e.directory && e.path.equalsIgnoreCase("sources/boot.wim"))
+                    IsoTree.Entry boot=entries.stream().filter(e->!e.directory && (windowsToGo?
+                            e.path.equalsIgnoreCase("sources/install.wim") || e.path.equalsIgnoreCase("sources/install.esd"):e.path.equalsIgnoreCase("sources/boot.wim")))
                             .findFirst().orElseThrow(()->new IOException("W obrazie nie znaleziono instalatora Windows."));
                     List<WimMetadata.Image> images;
                     try(ProxyImageFile proxy=new ProxyImageFile(this,selected,boot)) {images=WimMetadata.read(proxy.path());}
                     if(images.isEmpty())throw new IOException("boot.wim nie zawiera obrazów Windows.");
-                    int index=images.size()>=2?2:1;
-                    List<WimMetadata.Image> editions=Collections.emptyList();
+                    int index=windowsToGo?1:images.size()>=2?2:1;
+                    List<WimMetadata.Image> editions=windowsToGo?images:Collections.emptyList();
                     IsoTree.Entry install=entries.stream().filter(e->!e.directory &&
                             (e.path.equalsIgnoreCase("sources/install.wim") || e.path.equalsIgnoreCase("sources/install.esd")))
                             .findFirst().orElse(null);
-                    if(install!=null)try(ProxyImageFile proxy=new ProxyImageFile(this,selected,install)) {
+                    if(!windowsToGo && install!=null)try(ProxyImageFile proxy=new ProxyImageFile(this,selected,install)) {
                         editions=WimMetadata.read(proxy.path());
                     }
                     profile=new WindowsProfile(entries,index,images.get(index-1),editions);
                 }
                 ui(()->{
                     windowsProfile=profile;
-                    if(!windowsConfigured)windowsFlags=profile.build>=22000?
+                    if(!windowsConfigured)windowsFlags=windowsToGo?WindowsUnattend.WINDOWS_TO_GO|WindowsUnattend.OFFLINE_INTERNAL_DRIVES|
+                            (profile.build>=22500?WindowsUnattend.NO_ONLINE_ACCOUNT:0):
+                            profile.build>=22000?
                             WindowsUnattend.BYPASS_REQUIREMENTS|(profile.build>=22500?WindowsUnattend.NO_ONLINE_ACCOUNT:0):0;
                     setBusy(false);
                     if(windowsReviewed && afterApply!=null)afterApply.run();else showWindowsOptions(afterApply);
@@ -427,12 +435,18 @@ public class MainActivity extends AppCompatActivity {
     private WindowsUnattend.Options windowsSettings(int flags,String user,String locale,String timezone) {
         WindowsUnattend.Options options=new WindowsUnattend.Options();
         options.flags=flags;options.editionIndex=windowsEditionIndex;options.username=user;options.architecture=windowsProfile.architecture;
+        if(windowsToGo) {
+            options.flags=(flags|WindowsUnattend.WINDOWS_TO_GO)&~WindowsUnattend.SILENT_INSTALL;
+            for(WimMetadata.Image edition:windowsProfile.editions)if(edition.index==windowsEditionIndex) {
+                switch(edition.architecture){case "0":options.architecture=1;break;case "9":options.architecture=2;break;case "5":options.architecture=3;break;case "12":options.architecture=4;break;default:options.architecture=0;}
+            }
+        }
         options.inputLocale=locale;options.systemLocale=locale;options.userLocale=locale;options.uiLanguage=locale;
         options.timezone=timezone;options.fallbackLanguage=windowsProfile.language;options.setupLanguage=windowsProfile.language;
         return options;
     }
     private void showWindowsOptions(Runnable afterApply) {
-        if(windowsProfile.existingAnswer) {
+        if(!windowsToGo && windowsProfile.existingAnswer) {
             windowsReviewed=true;
             status.setText("Obraz zawiera własny plik odpowiedzi Windows.");
             if(afterApply!=null){afterApply.run();return;}
@@ -445,15 +459,15 @@ public class MainActivity extends AppCompatActivity {
         catch(IOException error){error(error);return;}
         if(windowsTimezone==null)windowsTimezone=zones.windowsZone(android.icu.util.TimeZone.getCanonicalID(TimeZone.getDefault().getID()));
         LinearLayout box=column();pad(box,20,8);
-        label(box,"Dostosuj instalację Windows do swoich potrzeb.",16,false);
+        label(box,windowsToGo?"Przygotuj pełny system Windows uruchamiany z USB.":"Dostosuj instalację Windows do swoich potrzeb.",16,false);
         int[] bits={WindowsUnattend.BYPASS_REQUIREMENTS,WindowsUnattend.NO_ONLINE_ACCOUNT,
                 WindowsUnattend.SET_USER,WindowsUnattend.NO_DATA_COLLECTION,WindowsUnattend.DUPLICATE_LOCALE,
                 WindowsUnattend.DISABLE_BITLOCKER,WindowsUnattend.QOL_ENHANCEMENTS,
-                WindowsUnattend.USE_MS2023_BOOTLOADERS,WindowsUnattend.APPLY_SKUSIPOLICY,WindowsUnattend.FORCE_S_MODE};
+                WindowsUnattend.USE_MS2023_BOOTLOADERS,WindowsUnattend.APPLY_SKUSIPOLICY,WindowsUnattend.FORCE_S_MODE,WindowsUnattend.OFFLINE_INTERNAL_DRIVES};
         String[] titles={"Pomiń wymagania TPM, Secure Boot i RAM","Nie wymagaj konta Microsoft", "Utwórz konto lokalne",
                 "Pomiń pytania o zbieranie danych", "Ustaw język, region i strefę czasową", "Wyłącz automatyczne szyfrowanie BitLocker",
                 "Zastosuj usprawnienia Rufusa", "Użyj bootloaderów Windows CA 2023",
-                "Zastosuj zasadę Secure Boot SkuSiPolicy", "Wymuś tryb Windows S (zaawansowane)"};
+                "Zastosuj zasadę Secure Boot SkuSiPolicy", "Wymuś tryb Windows S (zaawansowane)","Pozostaw wewnętrzne dyski komputera offline"};
         CheckBox[] checks=new CheckBox[bits.length];
         for(int i=0;i<bits.length;i++) {
             CheckBox check=checkbox(titles[i],(windowsFlags&bits[i])!=0);
@@ -461,7 +475,8 @@ public class MainActivity extends AppCompatActivity {
                 check.setChecked(false);check.setVisibility(View.GONE);
             }
             box.addView(check);checks[i]=check;
-            if(i>=7) {
+            if((windowsToGo && i==0) || (!windowsToGo && i==10)){check.setChecked(false);check.setVisibility(View.GONE);}
+            if(i>=7 && i<=9) {
                 String explanation=i==7?"Wymaga aktualnych certyfikatów Secure Boot komputera, w tym Windows UEFI CA 2023.":
                         i==8?"Unieważnia dodatkowe bootloadery. Może też uniemożliwić uruchamianie standardowych nośników Windows.":
                         "System może pozostać zablokowany w trybie S nawet po wymazaniu dysku i ponownej instalacji Windows.";
@@ -493,11 +508,12 @@ public class MainActivity extends AppCompatActivity {
             if(edition.index==windowsEditionIndex)selectedEdition=i;
         }
         Spinner edition=choices(silentBox,"Edycja Windows",editionNames,selectedEdition);
-        edition.setEnabled(silent.isChecked());
-        silent.setOnCheckedChangeListener((v,checked)->edition.setEnabled(checked));
+        if(windowsToGo){silent.setChecked(false);silent.setVisibility(View.GONE);}
+        edition.setEnabled(windowsToGo || silent.isChecked());
+        silent.setOnCheckedChangeListener((v,checked)->edition.setEnabled(windowsToGo || checked));
         Runnable refreshSilent=()->{
             boolean available=windowsProfile.build>=22000 && checks[2].isChecked() && checks[3].isChecked() && checks[4].isChecked() && editionNames.length>0;
-            silentBox.setVisibility(available?View.VISIBLE:View.GONE);
+            silentBox.setVisibility(available || windowsToGo?View.VISIBLE:View.GONE);
             if(!available)silent.setChecked(false);
         };
         checks[2].setOnCheckedChangeListener((v,checked)->{account.setEnabled(checked);refreshSilent.run();});
@@ -505,10 +521,11 @@ public class MainActivity extends AppCompatActivity {
         checks[4].setOnCheckedChangeListener((v,checked)->{regionBox.setVisibility(checked?View.VISIBLE:View.GONE);refreshSilent.run();});
         refreshSilent.run();
         ScrollView scroll=new ScrollView(this);scroll.addView(box);
-        var dialog=new MaterialAlertDialogBuilder(this).setTitle("Instalacja Windows").setView(scroll)
+        var dialog=new MaterialAlertDialogBuilder(this).setTitle(windowsToGo?"Windows To Go":"Instalacja Windows").setView(scroll)
                 .setNegativeButton("Anuluj",null).setPositiveButton("Zastosuj",null).show();
         dialog.getButton(-1).setOnClickListener(v->{
             int flags=0;for(int i=0;i<bits.length;i++)if(checks[i].isChecked())flags|=bits[i];
+            if(windowsToGo)flags|=WindowsUnattend.WINDOWS_TO_GO;
             String user=WindowsUnattend.sanitizeUsername(account.getText().toString()),region=locale.getText().toString().trim();
             String zone=zones.windows.get(timezone.getSelectedItemPosition());
             if(checks[2].isChecked() && !WindowsUnattend.validUsername(user)) {
@@ -638,8 +655,8 @@ public class MainActivity extends AppCompatActivity {
         UsbDevice selected=target;
         int selectedLun=targetLun;
         String method=image.uri==null?"MBR · FAT32 · "+volumeLabel:
-                useIso?(gpt?"GPT":"MBR")+" · NTFS · "+volumeLabel:"Zapis sektorowy DD";
-        int appliedWindowsFlags=windowsProfile!=null && !windowsProfile.existingAnswer?windowsFlags:0;
+                useIso?(windowsToGo?"Windows To Go · ":"")+(gpt?"GPT":"MBR")+" · NTFS · "+volumeLabel:"Zapis sektorowy DD";
+        int appliedWindowsFlags=windowsProfile!=null && (windowsToGo || !windowsProfile.existingAnswer)?windowsFlags:0;
         String confirmation="\n\n"+method+
                 (useIso && appliedWindowsFlags!=0?"\nPersonalizacja Windows: "+Integer.bitCount(appliedWindowsFlags)+" opcji":"")+
                 (useIso && (appliedWindowsFlags&WindowsUnattend.SET_USER)!=0?"\nKonto lokalne: "+windowsUser:"")+(testMedia?"\nTest bloków: "+BadBlocks.OPTIONS[badBlockOption]+(detectFakeMedia?" · wykrywanie fałszywej pojemności":""):"")
@@ -668,6 +685,12 @@ public class MainActivity extends AppCompatActivity {
                         throw new IOException("Zmieniono plik źródłowy. Wybierz go ponownie.");
                 }
                 if (disk.capacity!=expectedCapacity) throw new IOException("Zmieniła się pojemność urządzenia. Wybierz nośnik ponownie.");
+                if(useIso && windowsToGo) {
+                    writeWindowsToGo(input,disk);
+                    ui(()->{progress.setIndeterminate(false);progress.setProgressCompat(100,true);flashing=false;setBusy(false);
+                        status.setText("Windows To Go jest gotowy. Pliki rozruchowe zostały zweryfikowane. Uruchom komputer z USB.");});
+                    return;
+                }
                 DiskLayout.Source source=()->input.open(this);
                 DiskLayout layout;
                 WindowsLayout windowsLayout=null;
@@ -711,25 +734,7 @@ public class MainActivity extends AppCompatActivity {
                 }
                 else {layout=new DiskLayout(); layout.add(0,input.length,source);}
                 layout.validate(disk.capacity,disk.blockSize);
-                if (testMedia) {
-                    boolean repeat;
-                    do {
-                        final int[] lastTestStep={-1};
-                        BadBlocks.Report report=BadBlocks.run(disk.partition(0,disk.capacity),badBlockOption,detectFakeMedia,
-                                (pass,passes,reading,bytes,total)->{
-                                    if (cancel || Thread.currentThread().isInterrupted()) throw new InterruptedIOException("Przerwano test bloków.");
-                                    int percent=(int)(100.0*bytes/total);
-                                    int step=(pass*2+(reading?1:0))*101+percent;
-                                    if(lastTestStep[0]!=step) {
-                                        lastTestStep[0]=step;
-                                        ui(()->{status.setText("Test bloków · "+pass+"/"+passes+" · "+(reading?"odczyt":"zapis")+" · "+percent+"%");progress.setProgressCompat(percent,false);});
-                                    }
-                                });
-                        int choice=report.failures.isEmpty()?2:badBlockDecision(report);
-                        if(choice==0) throw new InterruptedIOException("Przerwano zapis po teście bloków.");
-                        repeat=choice==1;
-                    } while(repeat);
-                }
+                testDisk(disk);
                 final int[] last={-1};
                 disk.flash(layout,(verify,bytes)->{
                     if (cancel || Thread.currentThread().isInterrupted()) throw new InterruptedIOException("Przerwano operację. Zapisz obraz ponownie przed użyciem nośnika.");
@@ -775,6 +780,66 @@ public class MainActivity extends AppCompatActivity {
             } catch (Exception e) { error(e); }
             finally {if(bootFilesDirectory!=null)clear(bootFilesDirectory);}
         });
+    }
+    private void writeWindowsToGo(ImageFile input,UsbDisk disk) throws Exception {
+        if(windowsProfile==null)throw new IOException("Wybierz edycję Windows To Go.");
+        IsoTree.Entry source=windowsProfile.entries.stream().filter(e->!e.directory &&
+                (e.path.equalsIgnoreCase("sources/install.wim") || e.path.equalsIgnoreCase("sources/install.esd")))
+                .findFirst().orElseThrow(()->new IOException("Brak źródłowego install.wim lub install.esd."));
+        WindowsUnattend.Options options=windowsSettings(windowsFlags,windowsUser,windowsLocale,windowsTimezone);
+        WindowsToGoLayout layout=WindowsToGoLayout.create(disk.capacity,disk.blockSize,ntfsClusterSize,gpt,
+                bootResource("mbr_win7.bin"),gpt?null:bootResource("uefi-ntfs.img"));
+        BlockDevice raw=disk.partition(0,disk.capacity);
+        BlockDevice device=new BlockDevice() {
+            public long size(){return raw.size();}public int sectorSize(){return raw.sectorSize();}
+            private void check() throws IOException {if(cancel || Thread.currentThread().isInterrupted())throw new InterruptedIOException("Przerwano Windows To Go.");}
+            public void read(long offset,byte[] bytes) throws IOException {check();raw.read(offset,bytes);}
+            public void write(long offset,byte[] bytes) throws IOException {check();raw.write(offset,bytes);}
+            public void sync() throws IOException {raw.sync();}
+        };
+        try(ProxyImageFile proxy=new ProxyImageFile(this,input,source)) {
+            List<WimMetadata.Image> editions=WimMetadata.read(proxy.path());
+            WimMetadata.Image edition=editions.stream().filter(e->e.index==windowsEditionIndex).findFirst()
+                    .orElseThrow(()->new IOException("Wybrana edycja nie istnieje w obrazie Windows."));
+            WindowsToGoInstaller.requireCapacity(edition,layout.main.length,ntfsClusterSize);
+            // Read/validate the source before the optional destructive surface test.
+            WindowsUnattend.validate(options);testDisk(disk);
+            final String[] last={""};
+            WindowsToGoInstaller.install(device,layout,proxy.path(),windowsEditionIndex,volumeLabel,ntfsClusterSize,quickFormat,
+                    !gpt && options.architecture<=2,true,getCacheDir(),options,bootResource("br_ntfs_0x0.bin"),bootResource("br_ntfs_0x54.bin"),
+                    (phase,path,done,total)->{
+                        if(cancel || Thread.currentThread().isInterrupted())throw new InterruptedIOException("Przerwano Windows To Go.");
+                        int percent=total<=0?0:(int)(100.0*done/total);String step=phase+":"+percent;
+                        if(!step.equals(last[0])) {
+                            last[0]=step;String text;
+                            switch(phase){case "format":text="Formatowanie";break;case "apply":text="Instalowanie Windows";break;case "verify":text="Weryfikacja";break;case "complete":text="Windows To Go jest gotowy";break;default:text="Pliki rozruchowe";}
+                            String description=text+" · "+percent+"%\n"+path;
+                            ui(()->{status.setText(description);progress.setProgressCompat(percent,percent>0);});
+                        }
+                    });
+            if(proxy.sourceFailure()!=null)throw proxy.sourceFailure();
+        }
+    }
+    private void testDisk(UsbDisk disk) throws Exception {
+        if (testMedia) {
+            boolean repeat;
+            do {
+                final int[] lastTestStep={-1};
+                BadBlocks.Report report=BadBlocks.run(disk.partition(0,disk.capacity),badBlockOption,detectFakeMedia,
+                        (pass,passes,reading,bytes,total)->{
+                            if (cancel || Thread.currentThread().isInterrupted()) throw new InterruptedIOException("Przerwano test bloków.");
+                            int percent=(int)(100.0*bytes/total);
+                            int step=(pass*2+(reading?1:0))*101+percent;
+                            if(lastTestStep[0]!=step) {
+                                lastTestStep[0]=step;
+                                ui(()->{status.setText("Test bloków · "+pass+"/"+passes+" · "+(reading?"odczyt":"zapis")+" · "+percent+"%");progress.setProgressCompat(percent,false);});
+                            }
+                        });
+                int choice=report.failures.isEmpty()?2:badBlockDecision(report);
+                if(choice==0) throw new InterruptedIOException("Przerwano zapis po teście bloków.");
+                repeat=choice==1;
+            } while(repeat);
+        }
     }
     private void applyWindowsAnswer(BlockDevice partition,WindowsCustomization plan,int index) throws Exception {
         File answer=File.createTempFile("rufus-answer-", ".xml",getCacheDir());

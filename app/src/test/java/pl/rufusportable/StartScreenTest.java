@@ -112,6 +112,26 @@ public class StartScreenTest {
         var show=MainActivity.class.getDeclaredMethod("showWindowsOptions",Runnable.class);show.setAccessible(true);show.invoke(activity,(Object)null);
         return (androidx.appcompat.app.AlertDialog)org.robolectric.shadows.ShadowDialog.getLatestDialog();
     }
+    @Test public void windowsToGoKeepsEditionAndOfflineSettingsWithoutSilentDiskWipe() throws Exception {
+        Shadows.shadowOf(RuntimeEnvironment.getApplication()).grantPermissions("pl.rufusportable.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION");
+        var mode=MainActivity.class.getDeclaredField("windowsToGo");mode.setAccessible(true);
+        var flags=MainActivity.class.getDeclaredField("windowsFlags");flags.setAccessible(true);
+        try(var controller=Robolectric.buildActivity(MainActivity.class).setup()) {
+            windowsProfile(controller.get());mode.setBoolean(controller.get(),true);flags.setInt(controller.get(),WindowsUnattend.SILENT_INSTALL);
+            var dialog=windowsDialog(controller.get());View root=dialog.getWindow().getDecorView();
+            assertEquals(View.GONE,find(root,"Instalacja bezobsługowa — wymaż pierwszy dysk komputera").getVisibility());
+            TextView caption=(TextView)find(root,"Edycja Windows");android.widget.Spinner edition=root.findViewById(caption.getLabelFor());
+            assertTrue(edition.isEnabled());edition.setSelection(1);
+            ((android.widget.CheckBox)find(root,"Pozostaw wewnętrzne dyski komputera offline")).setChecked(true);
+            dialog.getButton(-1).performClick();assertFalse(dialog.isShowing());
+            assertEquals(0,flags.getInt(controller.get())&WindowsUnattend.SILENT_INSTALL);
+            assertNotEquals(0,flags.getInt(controller.get())&WindowsUnattend.WINDOWS_TO_GO);
+            controller.recreate();assertTrue(mode.getBoolean(controller.get()));windowsProfile(controller.get());
+            dialog=windowsDialog(controller.get());root=dialog.getWindow().getDecorView();
+            caption=(TextView)find(root,"Edycja Windows");edition=root.findViewById(caption.getLabelFor());assertEquals(1,edition.getSelectedItemPosition());
+            assertTrue(((android.widget.CheckBox)find(root,"Pozostaw wewnętrzne dyski komputera offline")).isChecked());
+        }
+    }
     @Test public void windowsOptionsValidateAccountsAndPersistAcrossRecreation() throws Exception {
         Shadows.shadowOf(RuntimeEnvironment.getApplication()).grantPermissions(
                 "pl.rufusportable.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION");

@@ -212,3 +212,15 @@ Testy hosta potwierdziły pliki BIOS+UEFI, ESP 512/4096 B, CA 2023, SanPolicy wy
 Sonda CI używa teraz krótkiego polecenia `powershell -File` i osobnego, wyłącznie testowego skryptu dostarczanego przez OEM. Numer polecenia następuje po istniejących poleceniach Rufusa. Skrypt zapisuje transkrypcję i błąd. Odczyt logów Panther, UnattendGC, użytej odpowiedzi i sondy wykonywany jest także po błędzie lub przekroczeniu czasu, po zatrzymaniu QEMU. Nie zmienia to generatora odpowiedzi aplikacji ani jego 32 768 porównań z oryginałem.
 
 72 testy Java, lint, budowanie czterech ABI oraz 13 testów instrumentacyjnych API 26/x86 przeszły dla warstwy Windows To Go i enumeracji NTFS. Pełny Windows To Go oraz integracja jego wyboru w interfejsie nadal pozostają w toku.
+
+## Wybór Windows To Go w aplikacji
+
+Opcje zapisu zawierają osobny tryb Windows To Go. Profil czyta wtedy install.wim/install.esd przez AppFuse; lista edycji pozostaje dostępna niezależnie od opcji instalacji bezobsługowej. Ustawienie edycji, trybu i dysków offline przetrwa odtworzenie Activity. Tryb Windows To Go nie emituje opcji automatycznego wymazania dysku 0 komputera.
+
+Przed formatowaniem sprawdzane są TOTALBYTES, FILECOUNT i DIRCOUNT WIM, zapas na klastry i struktury NTFS oraz przepełnienia arytmetyczne. Te same kontrole poprzedzają opcjonalny niszczący test bloków. Pełne zastosowanie WIM korzysta z deskryptora źródła Androida; kod rejestru i plików rozruchowych działa na docelowym NTFS/ESP. PBR BIOS korzysta z oryginalnego kodu Rufusa.
+
+Offline SYSTEM może także otrzymać SkuPolicyRequired=1 w wybranym ControlSet, zamiast polegać na nieobecnym na Androidzie DISM. Sam zapis/odczyt tej wartości jest sprawdzony; rozruch i egzekwowanie S mode wymagają oddzielnego testu. Znaczenie ustawienia opisuje [dokumentacja Microsoft CodeIntegrity](https://learn.microsoft.com/en-us/windows-hardware/customize/desktop/unattend/microsoft-windows-codeintegrity-skupolicyrequired). Język BCD pozostaje domyślnym en-US narzędzia bcdboot; opcje regionalne użytkownika dotyczą odpowiedzi systemu.
+
+[CI 46131605265](https://github.com/Novicek000/RufusPortable/actions/runs/46131605265) zakończył się sukcesem na API 26 i 35 z 13 testami dla rewizji 1e50981. Pierwszy obraz Windows To Go z tej rewizji uruchomił się w QEMU i pokazał „Getting ready”; starszą sondę zastąpiono nowym przebiegiem 46132703672. Nie ma jeszcze potwierdzonego wyniku pierwszego logowania Windows To Go.
+
+75 testów Java, lint i budowanie APK przeszły. Czysty przebieg API 26/x86 zakończył się `OK (14 tests)`, w tym otwarcie rzeczywistego testowego ISO, odczyt install.wim przez JNI/AppFuse, wybór Windows To Go i edycji ARM64 oraz zachowanie dysków offline bez trybu wymazania dysku 0. W pierwszej próbie świeży emulator pokazał ANR procesu System UI; po ustabilizowaniu systemu oba testy interfejsu przeszły osobno, a następnie cały zestaw 14 testów przeszedł. Testowy ISO zawiera własne dane, nie Windows.

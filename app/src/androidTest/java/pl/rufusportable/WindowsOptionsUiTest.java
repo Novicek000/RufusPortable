@@ -114,4 +114,33 @@ public class WindowsOptionsUiTest {
             instrumentation.runOnMainSync(activity::finish);instrumentation.waitForIdleSync();assertTrue(source.delete());
         }
     }
+    @Test public void selectsWindowsToGoReadsInstallWimAndKeepsEditionWithoutDiskWipeMode() throws Exception {
+        Context context=instrumentation.getTargetContext();File source=File.createTempFile("wintogo-source-", ".iso",context.getCacheDir());
+        try(InputStream input=instrumentation.getContext().getAssets().open("windows-test.iso");OutputStream output=new FileOutputStream(source)) {
+            byte[] buffer=new byte[16384];int count;while((count=input.read(buffer))!=-1)output.write(buffer,0,count);
+        }
+        MainActivity activity=(MainActivity)instrumentation.startActivitySync(new Intent(context,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        try {
+            instrumentation.runOnMainSync(()->activity.onActivityResult(1,Activity.RESULT_OK,new Intent().setData(Uri.fromFile(source))));
+            await(()->{AtomicBoolean ready=new AtomicBoolean();instrumentation.runOnMainSync(()->{
+                View view=find(activity.getWindow().getDecorView(),"Opcje zapisu");ready.set(view!=null && view.isEnabled());});return ready.get();});
+            instrumentation.runOnMainSync(()->find(activity.getWindow().getDecorView(),"Opcje zapisu").performClick());
+            await(()->node("Tryb Windows")!=null);
+            AccessibilityNodeInfo mode=node("Tryb Windows").getLabelFor();assertNotNull(mode);
+            assertTrue(mode.performAction(AccessibilityNodeInfo.ACTION_CLICK));click("Windows To Go — system uruchamiany z USB");click("Zastosuj");
+            await(()->node("Tryb Windows")==null);
+            instrumentation.runOnMainSync(()->find(activity.getWindow().getDecorView(),"Instalacja Windows").performClick());
+            await(()->node("Pozostaw wewnętrzne dyski komputera offline")!=null);
+            assertTrue(node("Pozostaw wewnętrzne dyski komputera offline").isChecked());
+            assertNull(node("Instalacja bezobsługowa — wymaż pierwszy dysk komputera"));
+            AccessibilityNodeInfo edition=node("Edycja Windows").getLabelFor();assertNotNull(edition);assertTrue(edition.isEnabled());
+            edition.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.getId());
+            assertTrue(edition.performAction(AccessibilityNodeInfo.ACTION_CLICK));click("Windows Test Education · ARM64 · indeks 2");
+            click("Zastosuj");await(()->node("Pozostaw wewnętrzne dyski komputera offline")==null);
+            instrumentation.runOnMainSync(()->find(activity.getWindow().getDecorView(),"Instalacja Windows").performClick());
+            await(()->node("Windows Test Education · ARM64 · indeks 2")!=null);
+            assertTrue(node("Pozostaw wewnętrzne dyski komputera offline").isChecked());
+            click("Anuluj");
+        } finally {instrumentation.runOnMainSync(activity::finish);instrumentation.waitForIdleSync();assertTrue(source.delete());}
+    }
 }

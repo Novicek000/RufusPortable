@@ -76,4 +76,17 @@ public class WindowsToGoLayoutTest {
             assertThrows(IOException.class,()->WindowsBootConfiguration.device(disk,other.main));
         }
     }
+    @Test public void capacityChecksExpandedBytesClustersAndNtfsReserveBeforeFormatting() throws Exception {
+        Map<String,String> values=new HashMap<>();values.put("TOTALBYTES",Long.toString(20L<<30));values.put("FILECOUNT","150000");values.put("DIRCOUNT","30000");
+        WimMetadata.Image image=new WimMetadata.Image(1,values);
+        WindowsToGoInstaller.requireCapacity(image,32L<<30,4096);
+        assertThrows(IOException.class,()->WindowsToGoInstaller.requireCapacity(image,16L<<30,4096));
+        assertThrows(IOException.class,()->WindowsToGoInstaller.requireCapacity(image,32L<<30,2097152));
+        values.put("TOTALBYTES",Long.toString(Long.MAX_VALUE));
+        assertThrows(IOException.class,()->WindowsToGoInstaller.requireCapacity(new WimMetadata.Image(1,values),Long.MAX_VALUE,4096));
+        values.put("TOTALBYTES","-1");
+        assertThrows(IOException.class,()->WindowsToGoInstaller.requireCapacity(new WimMetadata.Image(1,values),32L<<30,4096));
+        values.remove("TOTALBYTES");
+        assertThrows(IOException.class,()->WindowsToGoInstaller.requireCapacity(new WimMetadata.Image(1,values),32L<<30,4096));
+    }
 }
