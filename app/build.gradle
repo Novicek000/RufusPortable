@@ -74,3 +74,17 @@ def nativeHive = tasks.register('buildNativeHive', Exec) {
     })
 }
 tasks.named('preBuild').configure { dependsOn nativeHive }
+
+def nativeBoot = tasks.register('buildNativeBoot', Exec) {
+    workingDir rootProject.projectDir
+    commandLine 'bash', 'scripts/build-boot.sh', 'arm64-v8a', 'armeabi-v7a', 'x86_64', 'x86'
+    environment 'ANDROID_NDK_HOME', System.getenv('ANDROID_NDK_HOME') ?:
+            new File(System.getenv('ANDROID_HOME') ?: '', 'ndk/27.2.12479018').absolutePath
+    inputs.file rootProject.file('scripts/build-boot.sh')
+    inputs.dir rootProject.file('third_party/rufus/src/syslinux/libinstaller')
+    inputs.files file('src/main/cpp/syslinux_bridge.c'), file('src/main/cpp/syslinux_bridge.h'), file('src/main/cpp/boot_jni.c')
+    outputs.files(['arm64-v8a', 'armeabi-v7a', 'x86_64', 'x86'].collect {
+        layout.buildDirectory.file("native/jniLibs/${it}/librufus_boot.so")
+    })
+}
+tasks.named('preBuild').configure { dependsOn nativeBoot }

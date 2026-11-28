@@ -19,6 +19,8 @@ final class FatVolume {
     private final List<Node> nodes=new ArrayList<>(),allocated=new ArrayList<>();
     private final long usedClusters;
     private final int date,time,tenths;
+    private final int volumeId=new java.security.SecureRandom().nextInt();
+    private byte[] bootOverride;
     private static final class Node {
         final Node parent;
         final String name;
@@ -27,6 +29,7 @@ final class FatVolume {
         byte[] alias;
         boolean longName;
         int start,count;
+        int attributes=0x20;
         Node(Node parent,String name,IsoTree.Entry entry) {this.parent=parent;this.name=name;this.entry=entry;}
         boolean directory(){return entry==null || entry.directory;}
         String path(){return entry==null?"":entry.path;}
@@ -154,6 +157,7 @@ final class FatVolume {
         return entries*32;
     }
     private byte[] boot() {
+        if(bootOverride!=null)return bootOverride.clone();
         byte[] bytes=new byte[sector];ByteBuffer b=ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN);
         b.put(new byte[]{(byte)0xeb,(byte)(bits==32?0x58:0x3c),(byte)0x90}).put("MSWIN4.1".getBytes(StandardCharsets.US_ASCII));
         b.putShort((short)sector).put((byte)spc).putShort((short)reserved).put((byte)2).putShort((short)(bits==16?ROOT_ENTRIES:0));
@@ -161,9 +165,29 @@ final class FatVolume {
         b.putShort((short)(bits==16 && sectors<65536?sectors:0)).put((byte)0xf8).putShort((short)(bits==16?fatSectors:0));
         b.putShort((short)63).putShort((short)255).putInt((int)hidden).putInt((int)(bits==16 && sectors<65536?0:sectors));
         if(bits==32)b.putInt(fatSectors).putShort((short)0).putShort((short)0).putInt(root.start).putShort((short)1).putShort((short)6);
-        b.position(bits==32?64:36);b.put((byte)128).put((byte)0).put((byte)0x29).putInt(new java.security.SecureRandom().nextInt());
+        b.position(bits==32?64:36);b.put((byte)128).put((byte)0).put((byte)0x29).putInt(volumeId);
         b.put(new String(label,StandardCharsets.US_ASCII).trim().isEmpty()?"NO NAME    ".getBytes(StandardCharsets.US_ASCII):label).put((bits==32?"FAT32   ":"FAT16   ").getBytes(StandardCharsets.US_ASCII));b.putShort(510,(short)0xaa55);
         return bytes;
+    }
+    byte[] bootSector(){return boot();}
+    void useBootSector(byte[] patched) throws IOException {
+        if(patched==null || patched.length!=sector || patched[510]!=0x55 || patched[511]!=(byte)0xaa ||
+                !Arrays.equals(Arrays.copyOfRange(boot(),11,bits==32?90:62),Arrays.copyOfRange(patched,11,bits==32?90:62)))
+            throw new IOException("Kod rozruchowy zmienia geometrię FAT.");
+        bootOverride=patched.clone();
+    }
+    private Node file(String path) throws IOException {
+        for(Node node:nodes)if(!node.directory() && key(node.path()).equals(key(path)))return node;
+        throw new IOException("Nie ma pliku FAT: "+path);
+    }
+    long[] fileSectors(String path,int maximum) throws IOException {
+        Node node=file(path);long count=(node.entry.length+sector-1)/sector;
+        if(maximum<0 || maximum>1048576 || count>maximum)throw new IOException("Mapa pliku FAT przekracza limit instalatora rozruchu.");
+        long[] result=new long[(int)count];long first=offset(node)/sector;
+        for(int i=0;i<result.length;i++)result[i]=first+i;return result;
+    }
+    void attributes(String path,int attributes) throws IOException {
+        if((attributes&~0x27)!=0)throw new IOException("Nieprawidłowe atrybuty pliku FAT.");file(path).attributes=attributes;
     }
     private byte[] shortEntry(byte[] name,int attributes,int start,long length) {
         byte[] bytes=new byte[32];ByteBuffer b=ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN);
@@ -268,7 +292,7 @@ final class FatVolume {
         for(Node child:directory.children) {
             int count=child.longName?(child.name.length()+12)/13:0;
             for(int i=count;i>0;i--)writer.add(longEntry(child,i,count));
-            writer.add(shortEntry(child.alias,child.directory()?0x10:0x20,child.start,child.directory()?0:child.entry.length));
+            writer.add(shortEntry(child.alias,child.directory()?0x10:child.attributes,child.start,child.directory()?0:child.entry.length));
         }
         writer.finish();
     }

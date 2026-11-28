@@ -24,11 +24,12 @@ Celem jest zgodność funkcjonalna z Rufusem z rewizji 8337c3e7e534b5d5b5045dd8e
 | Funkcja oryginału | Stan |
 | --- | --- |
 | Standardowy instalator Windows wypakowany na NTFS | Ścieżka jest podłączona w aplikacji, pliki kopiowane i weryfikowane po ponownym montowaniu; WinPE uruchomiony w QEMU, pełna instalacja do sprawdzenia |
-| Windows To Go | Aplikowanie WIM przez callbackowy backend NTFS jest zaimplementowane i sprawdzone; konfiguracja BCD, ESP/MSR i integracja trybu pozostają do wykonania |
+| Windows To Go | WIM→NTFS, BCD, ESP/MSR i wybór trybu w aplikacji są podłączone; QEMU uruchomił system do Getting ready, pełne pierwsze logowanie w toku |
 | Personalizacja instalatora Windows i unattended XML | Konto, prywatność, region, BitLocker, wymagania Windows 11 i QoL podłączone do zapisu; instalacja bezobsługowa i wybór edycji podłączone; CA 2023, SkuSiPolicy i tryb S podłączone; instalacja systemu do weryfikacji |
 | FreeDOS | Podstawowy start BIOS sprawdzony w QEMU |
 | MS-DOS | Do implementacji wraz z odpowiednim źródłem plików systemowych |
-| Syslinux 4/6, GRUB2, Grub4DOS, ReactOS | Do implementacji |
+| Syslinux 4/6 | Oryginalny patcher i instalacja na FAT16/FAT32 sprawdzone, rozruch BIOS potwierdzony w QEMU; integracja wyboru i obrazy Linux w toku |
+| GRUB2, Grub4DOS, ReactOS | Do implementacji |
 | Trwała przestrzeń Live Linux | Do implementacji |
 | Pobieranie ISO, bootloaderów i danych DBX/SBAT | Do implementacji |
 | Pełne opcje etykiet, klastrów, GPT/MBR, BIOS/UEFI, stare BIOS | Do porównania i uzupełnienia |
@@ -234,3 +235,15 @@ Opcje pozwalają wybrać rozruch automatyczny, tylko UEFI albo tylko BIOS. BIOS 
 W Windows To Go CA 2023 pliki bootmgfw_EX.efi, memtest_EX.efi i czcionki z Fonts_EX otrzymują nazwy docelowe bez _EX. Poprzedni test syntetyczny używał nazw bez przyrostka w katalogach _EX; poprawiono go tak, aby odwzorowywał nazwy Microsoft. Niezależny fsck.fat i PyFatFS potwierdziły zawartość obu ESP 512/4096 B po tej zmianie. To sprawdza przygotowanie plików; rozruch z CA 2023 przy Secure Boot nadal wymaga testu.
 
 77 testów Java, lint, cztery ABI i testy natywne WIM przeszły, w tym wszystkie wcześniejsze próby metadanych NTFS oraz 32 768 porównań odpowiedzi XML z Rufusem. 14 testów API 26/x86 przeszło z wykrywaniem plików przez AppFuse i zachowaniem wyboru „Tylko UEFI” w interfejsie. [CI 46133171849](https://github.com/Novicek000/RufusPortable/actions/runs/46133171849) wcześniej potwierdził rewizję 8ccc097 z 14 testami także na API 35.
+
+## Oryginalny Syslinux 4/6 i podpisy zasobów
+
+Nowa biblioteka `librufus_boot` dla czterech ABI kompiluje niezmienione syslxmod.c, fs.c i setadv.c z przypiętego Rufusa. Adapter sprawdza rozmiary, obszary EPA, mapę sektorów i miejsce na ekstenty przed wejściem do oryginalnego patchera. Wywołania z jego globalnym stanem są serializowane. Testy C porównują wynik bajt po bajcie z bezpośrednim wywołaniem oryginału dla FAT16/FAT32, ciągłych i pofragmentowanych map, podkatalogu oraz flag stupid/RAID. Sprawdzono 10 000 mutacji wejścia i równoległe wywołania; ASan i UBSan przeszły. Celowo nie jest włączony sanitizer wyrównania: upstream używa niealignedowanych dostępów x86. Lokalny sandbox nie obsługuje LeakSanitizer pod ptrace, więc lokalnie użyto BOOT_ASAN_OPTIONS=detect_leaks=0; workflow CI używa domyślnego wykrywania wycieków.
+
+`RufusSignature` weryfikuje SHA-256/RSA oryginalnym publicznym kluczem z pki.c. Podpis oficjalnego ldlinux.c32 z rufus.ie został potwierdzony niezależnym OpenSSL. Klasa Java zachowuje standardowe kodowanie big-endian, bez odwracania wymaganego tylko przez CryptoAPI Windows. Zasoby Syslinux, ich pochodzenie i sumy są opisane w assets/syslinux/readme.txt.
+
+`SyslinuxVolume` planuje plik ldlinux.sys + ADV i jego rzeczywiste sektory przed formatowaniem. Oryginalny kod patchuje plik oraz PBR; zapisy FAT obejmują atrybuty ReadOnly/Hidden/System i zgodny zapasowy boot sektor FAT32. Geometria BPB nie może zostać nadpisana przez wstrzyknięty kod. Skrypt test-syslinux-volume.sh buduje własne obrazy MBR z oryginalnym MBR Rufusa; fsck.fat i PyFatFS oraz osobny dekoder łańcuchów FAT sprawdzają zawartość i zgodność wskaźników/ekstentów Syslinux z fizyczną alokacją pliku.
+
+W QEMU/SeaBIOS wszystkie cztery warianty (4.07/FAT16, 4.07/FAT32, 6.04/FAT16, 6.04/FAT32) odczytały i wykonały testowy syslinux.cfg. Dla wersji 6 odczytano bufor tekstowy VGA, ponieważ SERIAL jest aktywowane po obsłudze SAY. VM pracuje na tymczasowej migawce, nie zmieniając obrazu źródłowego. Jest to test uruchomienia bootloadera i konfiguracji, nie jądra Linux.
+
+80 testów Java, lint i budowanie APK przeszły. 16 testów API 26/x86 przeszło, w tym zapis/weryfikacja obu wersji na obu FAT, weryfikacja podpisu na Androidzie, brak mutowania buforów i zachowanie starszych/wyższych 32 bitów adresu LBA. Workflow Androida dodaje te testy oraz uruchamianie QEMU. Podłączenie tych wariantów do wyboru źródła w interfejsie i wypakowywanie rzeczywistych obrazów Linux pozostają w toku.

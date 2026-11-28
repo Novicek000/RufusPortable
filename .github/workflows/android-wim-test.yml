@@ -36,7 +36,7 @@ jobs:
       - name: Install native build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y autoconf automake libtool autotools-dev patch pkg-config libgcrypt20-dev ntfs-3g dosfstools mtools
+          sudo apt-get install -y autoconf automake libtool autotools-dev patch pkg-config libgcrypt20-dev ntfs-3g dosfstools mtools qemu-system-x86
           sdkmanager 'ndk;27.2.12479018' 'platforms;android-36' 'build-tools;35.0.0'
       - name: Build APKs and test native WIM metadata
         run: |
@@ -45,6 +45,7 @@ jobs:
           bash scripts/test-native-wim.sh
           bash scripts/test-native-hive.sh
           bash scripts/test-hive-reference.sh
+          bash scripts/test-native-boot.sh
       - name: Independently verify FAT16 and FAT32 trees
         run: |
           python3 -m venv "$RUNNER_TEMP/fat-test-venv"
@@ -52,6 +53,7 @@ jobs:
           export FAT_TEST_PYTHON="$RUNNER_TEMP/fat-test-venv/bin/python"
           bash scripts/test-fat-volume.sh
           bash scripts/test-wintogo-boot.sh
+          bash scripts/test-syslinux-volume.sh
       - name: Enable runner KVM access
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
