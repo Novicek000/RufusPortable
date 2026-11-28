@@ -17,6 +17,10 @@ final class ImageFile {
     private ImageFile(Uri uri,String name,long length) {
         this.uri=uri; this.name=name; this.length=length;
     }
+    static ImageFile syslinux(int version) {
+        if(version!=4 && version!=6)throw new IllegalArgumentException("Invalid Syslinux version");
+        return new ImageFile(null,version==4?"Syslinux 4.07":"Syslinux 6.04",0);
+    }
     static ImageFile volume(boolean dos) {
         return new ImageFile(null,dos?"FreeDOS 1.4":"Pusty wolumin FAT32",0);
     }

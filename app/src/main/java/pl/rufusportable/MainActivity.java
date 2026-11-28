@@ -42,6 +42,7 @@ public class MainActivity extends AppCompatActivity {
     private MaterialButton settings, hash, other, wimInfo, windowsOptions;
     private boolean gpt, verifyWrite=true, useIso, testMedia, dos;
     private int ntfsClusterSize=4096, badBlockOption;
+    private int syslinuxVersion, fatBits=32, fatClusterSize;
     private boolean detectFakeMedia=true;
     private boolean quickFormat=true;
     private String volumeLabel="RUFUS";
@@ -118,7 +119,11 @@ public class MainActivity extends AppCompatActivity {
             testMedia=state.getBoolean("testMedia");
             badBlockOption=state.getInt("badBlockOption",0); detectFakeMedia=state.getBoolean("detectFakes",true);
             if (saved!=null) select(Uri.parse(saved),state.getBoolean("iso"));
-            else if (state.getBoolean("builtin")) builtin(state.getBoolean("dos"));
+            else if (state.getBoolean("builtin")) {
+                int sys=state.getInt("syslinux");
+                fatBits=state.getInt("fatBits",32);fatClusterSize=state.getInt("fatCluster");
+                if(sys==4 || sys==6) builtinSyslinux(sys);else builtin(state.getBoolean("dos"));
+            }
         }
         checkUpdates();
     }
@@ -133,6 +138,7 @@ public class MainActivity extends AppCompatActivity {
         state.putBoolean("builtin",image!=null && image.uri==null); state.putBoolean("dos",dos); state.putBoolean("testMedia",testMedia);
         state.putBoolean("iso",useIso); state.putBoolean("gpt",gpt); state.putBoolean("verify",verifyWrite);
         state.putInt("badBlockOption",badBlockOption);state.putBoolean("detectFakes",detectFakeMedia);
+        state.putInt("syslinux",syslinuxVersion);state.putInt("fatBits",fatBits);state.putInt("fatCluster",fatClusterSize);
         state.putInt("ntfsCluster",ntfsClusterSize); state.putBoolean("quick",quickFormat); state.putString("label",volumeLabel);
     }
 
@@ -197,11 +203,7 @@ public class MainActivity extends AppCompatActivity {
         imageName = label(source,"Wybierz obraz dysku",22,true);
         imageMeta = label(source,"Windows / Linux ISO, IMG, RAW, BIN lub DD",15,false);
         choose = button(source,"Wybierz plik",this::pickFile,false);
-        other=button(source,"Inne opcje rozruchu",()->new MaterialAlertDialogBuilder(this).setTitle("Opcje rozruchu")
-                .setItems(new String[]{"FreeDOS 1.4 · BIOS","Formatuj jako FAT32","Pobierz Windows 11 od Microsoftu"},(d,i)->{
-                    if (i<2) builtin(i==0);
-                    else startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse("https://www.microsoft.com/pl-pl/software-download/windows11")));
-                }).setNegativeButton("Anuluj",null).show(),false);
+        other=button(source,"Inne opcje rozruchu",this::bootOptions,false);
         wimInfo=button(source,"Obrazy Windows w ISO",this::inspectWim,false);
         windowsOptions=button(source,"Instalacja Windows",()->configureWindows(null),false);
         LinearLayout destination = card(R.color.panel,24);
@@ -260,6 +262,7 @@ public class MainActivity extends AppCompatActivity {
         select(data.getData(),null);
     }
     private void select(Uri uri,Boolean restoreMode) {
+        syslinuxVersion=0;dos=false;
         windowsProfile=null;if(restoreMode==null)windowsReviewed=false;
         pickedUri=uri;
         image=null; imageName.setText(uri.getLastPathSegment()); imageMeta.setText("Odczytywanie nagłówka…");
@@ -278,14 +281,29 @@ public class MainActivity extends AppCompatActivity {
             } catch (Exception e) { ui(()->imageMeta.setText("Nie można przygotować tego obrazu.")); error(e); }
         });
     }
+    private void bootOptions() {
+        LinearLayout box=column();pad(box,20,8);
+        var dialog=new MaterialAlertDialogBuilder(this).setTitle("Opcje rozruchu").setView(box).setNegativeButton("Anuluj",null).create();
+        button(box,"FreeDOS 1.4 · BIOS",()->{dialog.dismiss();builtin(true);},false);
+        button(box,"Formatuj jako FAT32",()->{dialog.dismiss();builtin(false);},false);
+        button(box,"Syslinux 4.07 · BIOS",()->{dialog.dismiss();builtinSyslinux(4);},false);
+        button(box,"Syslinux 6.04 · BIOS",()->{dialog.dismiss();builtinSyslinux(6);},false);
+        button(box,"Pobierz Windows 11 od Microsoftu",()->{dialog.dismiss();startActivity(new Intent(Intent.ACTION_VIEW,
+                Uri.parse("https://www.microsoft.com/pl-pl/software-download/windows11")));},false);
+        dialog.show();
+    }
     private void builtin(boolean boot) {
         windowsProfile=null;windowsReviewed=false;windowsToGo=false;windowsConfigured=false;windowsFlags=0;
+        syslinuxVersion=0;
         pickedUri=null; dos=boot; useIso=false; image=ImageFile.volume(boot);
         showImage(); status.setText(target==null?"Wybierz nośnik USB.":"Sprawdź opcje i rozpocznij zapis."); refresh();
     }
+    private void builtinSyslinux(int version) {
+        builtin(false);syslinuxVersion=version;image=ImageFile.syslinux(version);showImage();
+    }
     private void showImage() {
         imageName.setText(image.name);
-        if (image.uri==null) { imageMeta.setText("MBR · FAT32 · "+(dos?"BIOS":"formatowanie")); return; }
+        if (image.uri==null) { imageMeta.setText("MBR · FAT"+(syslinuxVersion==0?32:fatBits)+" · "+(dos || syslinuxVersion!=0?"BIOS":"formatowanie")); return; }
         imageMeta.setText((image.length<0?"Rozmiar nieznany":size(image.length))+" · "+(useIso?(windowsToGo?"Windows To Go":"ISO · tryb plikowy")+" · "+(gpt?"GPT":"MBR")+" · NTFS":image.partition+" · DD"));
     }
     private Spinner choices(LinearLayout box,String title,String[] items,int selected) {
@@ -317,6 +335,13 @@ public class MainActivity extends AppCompatActivity {
         for(int i=0;i<clusterSizes.length;i++) if(clusterSizes[i]==ntfsClusterSize) clusterIndex=i;
         Spinner clusters=choices(isoBox,"Klaster NTFS",new String[]{"512 B","1 KiB","2 KiB","4 KiB","8 KiB","16 KiB","32 KiB","64 KiB","128 KiB","256 KiB","512 KiB","1 MiB","2 MiB"},clusterIndex);
         CheckBox quick=checkbox("Szybkie formatowanie",quickFormat); isoBox.addView(quick);
+        LinearLayout fatBox=column();box.addView(fatBox);fatBox.setVisibility(syslinuxVersion!=0?View.VISIBLE:View.GONE);
+        Spinner fatSystem=choices(fatBox,"System plików",new String[]{"FAT16","FAT32"},fatBits==16?0:1);
+        int[] fatClusters={0,512,1024,2048,4096,8192,16384,32768,65536};int fatSelected=0;
+        for(int i=0;i<fatClusters.length;i++)if(fatClusters[i]==fatClusterSize)fatSelected=i;
+        Spinner fatCluster=choices(fatBox,"Klaster FAT",new String[]{"Automatyczny","512 B","1 KiB","2 KiB","4 KiB","8 KiB","16 KiB","32 KiB","64 KiB"},fatSelected);
+        CheckBox fatQuick=checkbox("Szybkie formatowanie FAT",quickFormat);fatBox.addView(fatQuick);
+        label(fatBox,"Rozruch BIOS · MBR. Po instalacji dodaj jądro systemu i plik syslinux.cfg.",14,false);
         LinearLayout volumeBox=column(); box.addView(volumeBox);
         volumeBox.setVisibility(useIso || image.uri==null?View.VISIBLE:View.GONE);
         TextView caption=label(volumeBox,"Etykieta woluminu",16,true);
@@ -343,15 +368,17 @@ public class MainActivity extends AppCompatActivity {
         dialog.getButton(-1).setOnClickListener(v->{
             boolean iso=switchable?mode.getSelectedItemPosition()==1:useIso;
             boolean toGo=windowsMode.getSelectedItemPosition()==1;
-            if(toGo && scheme.getSelectedItemPosition()==1 && firmware.getSelectedItemPosition()==2){firmwareError.setText("Rozruch BIOS wymaga schematu MBR.");return;}
+            if(iso && toGo && scheme.getSelectedItemPosition()==1 && firmware.getSelectedItemPosition()==2){firmwareError.setText("Rozruch BIOS wymaga schematu MBR.");return;}
             String label=volume.getText().toString().trim();
             if (iso && !WindowsInstaller.validLabel(label)) { volume.setError("Etykieta NTFS może mieć do 32 znaków."); return; }
             if (image.uri==null && !label.matches("[a-zA-Z0-9 _-]{1,11}")) {volume.setError("Wpisz do 11 liter ASCII, cyfr, spacji, - lub _."); return;}
             useIso=iso; if (iso || image.uri==null) volumeLabel=label; testMedia=surface.isChecked();
+            toGo=iso && toGo;
             if(windowsToGo!=toGo){windowsToGo=toGo;windowsProfile=null;windowsReviewed=false;windowsConfigured=false;}
             windowsFirmware=firmware.getSelectedItemPosition();
             badBlockOption=patterns.getSelectedItemPosition();detectFakeMedia=fakes.isChecked();
             gpt=scheme.getSelectedItemPosition()==1; ntfsClusterSize=clusterSizes[clusters.getSelectedItemPosition()]; quickFormat=quick.isChecked();
+            if(syslinuxVersion!=0){fatBits=fatSystem.getSelectedItemPosition()==0?16:32;fatClusterSize=fatClusters[fatCluster.getSelectedItemPosition()];quickFormat=fatQuick.isChecked();}
             verifyWrite=verify.isChecked(); showImage(); dialog.dismiss();
         });
     }
@@ -667,7 +694,7 @@ public class MainActivity extends AppCompatActivity {
         if (!useIso && image.length>capacity) { status.setText("Obraz jest większy od nośnika. Wybierz większy pendrive."); return; }
         UsbDevice selected=target;
         int selectedLun=targetLun;
-        String method=image.uri==null?"MBR · FAT32 · "+volumeLabel:
+        String method=image.uri==null?"MBR · FAT"+(syslinuxVersion==0?32:fatBits)+" · "+volumeLabel:
                 useIso?(windowsToGo?"Windows To Go · ":"")+(gpt?"GPT":"MBR")+" · NTFS · "+volumeLabel:"Zapis sektorowy DD";
         int appliedWindowsFlags=windowsProfile!=null && (windowsToGo || !windowsProfile.existingAnswer)?windowsFlags:0;
         String confirmation="\n\n"+method+
@@ -699,6 +726,12 @@ public class MainActivity extends AppCompatActivity {
                         throw new IOException("Zmieniono plik źródłowy. Wybierz go ponownie.");
                 }
                 if (disk.capacity!=expectedCapacity) throw new IOException("Zmieniła się pojemność urządzenia. Wybierz nośnik ponownie.");
+                if(input.uri==null && syslinuxVersion!=0) {
+                    writeSyslinux(disk);
+                    ui(()->{progress.setIndeterminate(false);progress.setProgressCompat(100,true);flashing=false;setBusy(false);
+                        status.setText("Syslinux jest gotowy. Dodaj jądro systemu i konfigurację syslinux.cfg na przygotowanym nośniku.");});
+                    return;
+                }
                 if(useIso && windowsToGo) {
                     writeWindowsToGo(input,disk);
                     ui(()->{progress.setIndeterminate(false);progress.setProgressCompat(100,true);flashing=false;setBusy(false);
@@ -794,6 +827,34 @@ public class MainActivity extends AppCompatActivity {
             } catch (Exception e) { error(e); }
             finally {if(bootFilesDirectory!=null)clear(bootFilesDirectory);}
         });
+    }
+    private void writeSyslinux(UsbDisk disk) throws Exception {
+        if(disk.blockSize!=512)throw new IOException("Syslinux wymaga nośnika z sektorami 512 B.");
+        int cluster=FatGeometry.cluster(disk.capacity,fatBits,fatClusterSize);
+        MbrLayout layout=MbrLayout.create(disk.capacity,disk.blockSize,cluster,fatBits==16?0x0e:0x0c,true,asset("syslinux/mbr.bin"));
+        String prefix="syslinux/ldlinux_v"+syslinuxVersion;
+        SyslinuxVolume volume=new SyslinuxVolume(Collections.emptyList(),layout.length,512,fatBits,cluster,volumeLabel,layout.start/512,
+                asset(prefix+".sys"),asset(prefix+".bss"),syslinuxVersion==6?asset(prefix+".c32"):null,
+                syslinuxVersion==6?asset(prefix+".c32.sig"):null,"",false,false);
+        testDisk(disk);
+        disk.flash(layout.metadata,(verify,bytes)->{
+            if(cancel || Thread.currentThread().isInterrupted())throw new InterruptedIOException("Przerwano zapis Syslinux.");
+        },verifyWrite);
+        BlockDevice raw=disk.partition(layout.start,layout.length);
+        BlockDevice targetPartition=new BlockDevice() {
+            public long size(){return raw.size();}public int sectorSize(){return raw.sectorSize();}
+            private void check() throws IOException {if(cancel || Thread.currentThread().isInterrupted())throw new InterruptedIOException("Przerwano zapis Syslinux.");}
+            public void read(long offset,byte[] data) throws IOException {check();raw.read(offset,data);}
+            public void write(long offset,byte[] data) throws IOException {check();raw.write(offset,data);}
+            public void sync() throws IOException {check();raw.sync();}
+        };
+        final String[] last={""};
+        volume.install(targetPartition,entry->{throw new IOException("Brak źródła pliku: "+entry.path);},quickFormat,verifyWrite,
+                (phase,path,done,total)->{
+                    if(cancel || Thread.currentThread().isInterrupted())throw new InterruptedIOException("Przerwano zapis Syslinux.");
+                    int percent=total==0?0:(int)(100.0*done/total);String step=phase+":"+percent;
+                    if(!last[0].equals(step)){last[0]=step;ui(()->{status.setText(phase+" · "+percent+"%\n"+path);progress.setProgressCompat(percent,percent>0);});}
+                });
     }
     private void writeWindowsToGo(ImageFile input,UsbDisk disk) throws Exception {
         if(windowsProfile==null)throw new IOException("Wybierz edycję Windows To Go.");
@@ -909,8 +970,9 @@ public class MainActivity extends AppCompatActivity {
             }
         }
     }
-    private byte[] bootResource(String name) throws IOException {
-        try (InputStream input=getAssets().open("rufus/"+name);
+    private byte[] bootResource(String name) throws IOException {return asset("rufus/"+name);}
+    private byte[] asset(String name) throws IOException {
+        try (InputStream input=getAssets().open(name);
              ByteArrayOutputStream bytes=new ByteArrayOutputStream()) {
             byte[] buffer=new byte[16384]; int count;
             while ((count=input.read(buffer))!=-1) bytes.write(buffer,0,count);

@@ -28,7 +28,7 @@ Celem jest zgodność funkcjonalna z Rufusem z rewizji 8337c3e7e534b5d5b5045dd8e
 | Personalizacja instalatora Windows i unattended XML | Konto, prywatność, region, BitLocker, wymagania Windows 11 i QoL podłączone do zapisu; instalacja bezobsługowa i wybór edycji podłączone; CA 2023, SkuSiPolicy i tryb S podłączone; instalacja systemu do weryfikacji |
 | FreeDOS | Podstawowy start BIOS sprawdzony w QEMU |
 | MS-DOS | Do implementacji wraz z odpowiednim źródłem plików systemowych |
-| Syslinux 4/6 | Oryginalny patcher i instalacja na FAT16/FAT32 sprawdzone, rozruch BIOS potwierdzony w QEMU; integracja wyboru i obrazy Linux w toku |
+| Syslinux 4/6 | Oryginalny patcher i instalacja na FAT16/FAT32 sprawdzone, rozruch BIOS potwierdzony w QEMU; wybór obu wersji i ustawienia FAT w interfejsie, obrazy Linux w toku |
 | GRUB2, Grub4DOS, ReactOS | Do implementacji |
 | Trwała przestrzeń Live Linux | Do implementacji |
 | Pobieranie ISO, bootloaderów i danych DBX/SBAT | Do implementacji |
@@ -247,3 +247,9 @@ Nowa biblioteka `librufus_boot` dla czterech ABI kompiluje niezmienione syslxmod
 W QEMU/SeaBIOS wszystkie cztery warianty (4.07/FAT16, 4.07/FAT32, 6.04/FAT16, 6.04/FAT32) odczytały i wykonały testowy syslinux.cfg. Dla wersji 6 odczytano bufor tekstowy VGA, ponieważ SERIAL jest aktywowane po obsłudze SAY. VM pracuje na tymczasowej migawce, nie zmieniając obrazu źródłowego. Jest to test uruchomienia bootloadera i konfiguracji, nie jądra Linux.
 
 80 testów Java, lint i budowanie APK przeszły. 16 testów API 26/x86 przeszło, w tym zapis/weryfikacja obu wersji na obu FAT, weryfikacja podpisu na Androidzie, brak mutowania buforów i zachowanie starszych/wyższych 32 bitów adresu LBA. Workflow Androida dodaje te testy oraz uruchamianie QEMU. Podłączenie tych wariantów do wyboru źródła w interfejsie i wypakowywanie rzeczywistych obrazów Linux pozostają w toku.
+
+## Wybór Syslinux w aplikacji
+
+Menu rozruchu wybiera Syslinux 4.07 lub 6.04, FAT16/FAT32, automatyczny albo ręczny klaster i szybkie/pełne formatowanie. Przed testem powierzchni i pierwszym zapisem sprawdza zasoby, podpis modułu, geometrię i plan plików. Tworzy MBR z oryginalnym kodem, plik ldlinux.sys z atrybutami systemowy/ukryty/tylko do odczytu i oryginalny PBR. Dla wersji 6 dodaje podpisany ldlinux.c32. Kontrola SHA-256 obejmuje dane i metadane FAT. Dobór klastra korzysta z progów Rufusa i sprawdza rzeczywistą partycję po odjęciu wyrównania. Rozmiar wskazany ręcznie jest odrzucany, gdy liczba klastrów nie odpowiada FAT, zamiast zmieniać go podczas zapisu.
+
+Test instrumentacyjny API 26 przeszedł wybór obu wersji, zmianę FAT/klastra, odtworzenie Activity i powrót do FreeDOS. Ujawnił także brak akcji kliknięcia dostępności w standardowych pozycjach listy menu; menu używa teraz przycisków Material z poprawną akcją kliknięcia. Rozruch BIOS czterech kombinacji wersji i FAT potwierdzono wcześniej w QEMU. Test fizycznego USB OTG pozostaje do wykonania.

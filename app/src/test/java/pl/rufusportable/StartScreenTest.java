@@ -70,7 +70,7 @@ public class StartScreenTest {
             find(root,"Inne opcje rozruchu").performClick();
             androidx.appcompat.app.AlertDialog boot=(androidx.appcompat.app.AlertDialog)
                     org.robolectric.shadows.ShadowDialog.getLatestDialog();
-            boot.getListView().performItemClick(null,1,1);
+            find(boot.getWindow().getDecorView(),"Formatuj jako FAT32").performClick();
             find(root,"Opcje zapisu").performClick();
             androidx.appcompat.app.AlertDialog options=(androidx.appcompat.app.AlertDialog)
                     org.robolectric.shadows.ShadowDialog.getLatestDialog();
